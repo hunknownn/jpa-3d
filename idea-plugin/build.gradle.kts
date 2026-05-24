@@ -22,12 +22,17 @@ kotlin {
 }
 
 dependencies {
+    // JSON 직렬화 — IntelliJ Platform 도 내부적으로 Jackson 을 쓰지만,
+    // 명시 의존을 두는 편이 안전 (Platform 의 클래스 가시성이 버전마다 변동).
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
+
     intellijPlatform {
         // IntelliJ IDEA Community 2024.2 를 타겟. 추후 Ultimate JPA 모듈 의존이 필요해지면 IU 로 전환.
         intellijIdeaCommunity("2024.2")
 
-        // JCEF (JBCefBrowser) 와 ToolWindow API 만 사용 — 별도 bundled plugin 의존 없음.
-        bundledPlugins()
+        // Java PSI (PsiClass, PsiAnnotation 등) 를 위해 bundled Java plugin 필요.
+        // ToolWindow / JCEF 는 platform core 에 있어 추가 의존 불필요.
+        bundledPlugin("com.intellij.java")
         plugins()
 
         // instrumentCode task 가 NotNull 등 어노테이션 인식을 위해 필요
