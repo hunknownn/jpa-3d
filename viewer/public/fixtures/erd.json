@@ -1,0 +1,85 @@
+{
+  "seed": "",
+  "depth": 0,
+  "nodes": [
+    {
+      "id": "sample.User",
+      "name": "User",
+      "pkg": "sample",
+      "kind": "class",
+      "stereotypes": [],
+      "entity": {
+        "kind": "entity",
+        "tableName": "users",
+        "columns": [
+          { "fieldName": "id", "columnName": "id", "javaType": "java.lang.Long", "primaryKey": true, "nullable": false, "unique": false, "length": null, "generatedValue": "IDENTITY" },
+          { "fieldName": "createdAt", "columnName": "createdAt", "javaType": "java.time.Instant", "primaryKey": false, "nullable": false, "unique": false, "length": null, "generatedValue": null },
+          { "fieldName": "username", "columnName": "username", "javaType": "java.lang.String", "primaryKey": false, "nullable": false, "unique": true, "length": 50, "generatedValue": null }
+        ]
+      }
+    },
+    {
+      "id": "sample.Order",
+      "name": "Order",
+      "pkg": "sample",
+      "kind": "class",
+      "stereotypes": [],
+      "entity": {
+        "kind": "entity",
+        "tableName": "orders",
+        "columns": [
+          { "fieldName": "id", "columnName": "id", "javaType": "java.lang.Long", "primaryKey": true, "nullable": false, "unique": false, "length": null, "generatedValue": "IDENTITY" },
+          { "fieldName": "createdAt", "columnName": "createdAt", "javaType": "java.time.Instant", "primaryKey": false, "nullable": false, "unique": false, "length": null, "generatedValue": null },
+          { "fieldName": "amount", "columnName": "amount", "javaType": "int", "primaryKey": false, "nullable": false, "unique": false, "length": null, "generatedValue": null }
+        ]
+      }
+    },
+    {
+      "id": "sample.Role",
+      "name": "Role",
+      "pkg": "sample",
+      "kind": "class",
+      "stereotypes": [],
+      "entity": {
+        "kind": "entity",
+        "tableName": "roles",
+        "columns": [
+          { "fieldName": "id", "columnName": "id", "javaType": "java.lang.Long", "primaryKey": true, "nullable": false, "unique": false, "length": null, "generatedValue": "IDENTITY" },
+          { "fieldName": "createdAt", "columnName": "createdAt", "javaType": "java.time.Instant", "primaryKey": false, "nullable": false, "unique": false, "length": null, "generatedValue": null },
+          { "fieldName": "name", "columnName": "name", "javaType": "java.lang.String", "primaryKey": false, "nullable": false, "unique": false, "length": 30, "generatedValue": null }
+        ]
+      }
+    },
+    {
+      "id": "sample.BaseEntity",
+      "name": "BaseEntity",
+      "pkg": "sample",
+      "kind": "class",
+      "stereotypes": [],
+      "entity": {
+        "kind": "mappedSuperclass",
+        "tableName": null,
+        "columns": [
+          { "fieldName": "id", "columnName": "id", "javaType": "java.lang.Long", "primaryKey": true, "nullable": false, "unique": false, "length": null, "generatedValue": "IDENTITY" },
+          { "fieldName": "createdAt", "columnName": "createdAt", "javaType": "java.time.Instant", "primaryKey": false, "nullable": false, "unique": false, "length": null, "generatedValue": null }
+        ]
+      }
+    },
+    {
+      "id": "sample.UserRepository",
+      "name": "UserRepository",
+      "pkg": "sample",
+      "kind": "interface",
+      "stereotypes": ["Repository"],
+      "entity": null
+    }
+  ],
+  "links": [
+    { "source": "sample.Order", "target": "sample.User", "relation": "MANY_TO_ONE", "weight": 1, "label": "user" },
+    { "source": "sample.User", "target": "sample.Role", "relation": "MANY_TO_MANY", "weight": 1, "label": "roles (join: user_role)" },
+    { "source": "sample.User", "target": "sample.BaseEntity", "relation": "EXTENDS", "weight": 1, "label": null },
+    { "source": "sample.Order", "target": "sample.BaseEntity", "relation": "EXTENDS", "weight": 1, "label": null },
+    { "source": "sample.Role", "target": "sample.BaseEntity", "relation": "EXTENDS", "weight": 1, "label": null },
+    { "source": "sample.UserRepository", "target": "sample.User", "relation": "USES_ENTITY", "weight": 1, "label": null }
+  ]
+}

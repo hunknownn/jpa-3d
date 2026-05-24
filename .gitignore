@@ -1,0 +1,14 @@
+# Node / Vite
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Build outputs
+build/
+out/
