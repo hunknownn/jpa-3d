@@ -39,9 +39,35 @@ function hasBridge(): boolean {
   return typeof window !== "undefined" && window.__JPA3D_BRIDGE__ != null;
 }
 
+/**
+ * 브리지가 곧 주입될 수도 있으므로(JCEF 의 onLoadEnd 가 React mount 이후일 수 있음)
+ * 최대 `timeoutMs` 까지 `jpa3d:bridge-ready` 이벤트를 기다린다.
+ * 그래도 안 오면 null 로 떨어져 fixture fallback 으로 간다.
+ */
+function awaitBridge(timeoutMs = 1500): Promise<Jpa3dBridge | null> {
+  if (hasBridge()) return Promise.resolve(window.__JPA3D_BRIDGE__!);
+  return new Promise((resolve) => {
+    let done = false;
+    const onReady = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("jpa3d:bridge-ready", onReady);
+      resolve(window.__JPA3D_BRIDGE__ ?? null);
+    };
+    window.addEventListener("jpa3d:bridge-ready", onReady);
+    setTimeout(() => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("jpa3d:bridge-ready", onReady);
+      resolve(hasBridge() ? window.__JPA3D_BRIDGE__! : null);
+    }, timeoutMs);
+  });
+}
+
 export async function fetchErd(opts: ErdRequest): Promise<GraphData> {
-  if (hasBridge()) {
-    return window.__JPA3D_BRIDGE__!.request("erd", opts) as Promise<GraphData>;
+  const bridge = await awaitBridge();
+  if (bridge) {
+    return bridge.request("erd", opts) as Promise<GraphData>;
   }
   // 스탠드얼론 fallback: 미리 만들어둔 fixture
   const res = await fetch("/fixtures/erd.json");
@@ -51,8 +77,9 @@ export async function fetchErd(opts: ErdRequest): Promise<GraphData> {
 
 export async function searchErd(q: string, includeRepositories = true): Promise<GraphNode[]> {
   if (!q.trim()) return [];
-  if (hasBridge()) {
-    return window.__JPA3D_BRIDGE__!.request("search", { q, includeRepositories }) as Promise<GraphNode[]>;
+  const bridge = await awaitBridge();
+  if (bridge) {
+    return bridge.request("search", { q, includeRepositories }) as Promise<GraphNode[]>;
   }
   // 스탠드얼론 fallback: 전체 노드 목록에서 필터
   const res = await fetch("/fixtures/erd.json");

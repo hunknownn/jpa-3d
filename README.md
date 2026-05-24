@@ -8,7 +8,7 @@ JPA Entity ERD 를 3D / 2D 로 시각화하는 IntelliJ Plugin (작업 중).
 
 ```
 jpa-3d/
-├── viewer/                React + Vite 뷰어 (plugin 의 JCEF 안에 임베드 예정)
+├── viewer/                React + Vite 뷰어 (plugin 의 JCEF 안에 임베드)
 │   ├── src/
 │   │   ├── ErdApp.tsx     ERD 메인 화면
 │   │   ├── ErdView2D.tsx  elkjs 기반 2D ERD 렌더러
@@ -18,9 +18,18 @@ jpa-3d/
 │   │   └── main.tsx       엔트리
 │   └── public/fixtures/erd.json   스탠드얼론 개발용 더미 데이터
 │
-└── reference/             plugin 작성 시 참조용 — 직접 사용 X
-    ├── ClassIndexer.java       ASM 기반 JPA 어노테이션 처리 (PSI 로 다시 짤 것)
-    └── extractor-model/        Node / Edge / Relation / EntityInfo / ColumnInfo 자바 모델
+├── idea-plugin/           IntelliJ Plugin (Kotlin)
+│   └── src/main/
+│       ├── kotlin/com/jpa3d/
+│       │   ├── Jpa3dToolWindowFactory.kt   ToolWindow 등록
+│       │   ├── Jpa3dViewerPanel.kt         JCEF 패널 + lifecycle
+│       │   ├── BridgeInjector.kt           viewer ↔ plugin IPC 주입
+│       │   └── Jpa3dRequestHandler.kt      요청 핸들러 (현재 스텁)
+│       └── resources/META-INF/plugin.xml
+│
+└── reference/             PSI 분석기 작성 시 참조용 — 직접 사용 X
+    ├── ClassIndexer.java       ASM 기반 JPA 어노테이션 처리 (PSI 로 포팅 예정)
+    └── extractor-model/        Node / Edge / Relation / EntityInfo / ColumnInfo
 ```
 
 ## viewer 단독 실행 (plugin 없이)
@@ -45,9 +54,24 @@ interface Jpa3dBridge {
 
 브리지가 주입돼 있으면 `api.ts` 는 fetch 대신 그 브리지를 통해 호스트에 요청한다. `reference/` 의 자바 모델을 그대로 직렬화하면 viewer 의 `types.ts` 와 매칭된다.
 
+## Plugin 빌드 & 실행
+
+```bash
+# plugin zip 생성 (viewer 빌드 자동 수행)
+./gradlew :idea-plugin:buildPlugin
+# → idea-plugin/build/distributions/idea-plugin-*.zip
+
+# 샌드박스 IDE 에 plugin 띄워서 직접 확인
+./gradlew :idea-plugin:runIde
+```
+
+> Gradle 데몬은 JDK 21 을 사용한다 (`gradle.properties` 의 `org.gradle.java.home`).
+> Kotlin 컴파일러 IntelliJ 내장 utility 가 JDK 25 의 버전 문자열을 파싱 못해 막힌다.
+
 ## 다음 작업
 
-1. `idea-plugin/` 모듈 추가 (`intellij-platform-gradle-plugin`)
-2. ToolWindow + JCEF 패널 + viewer dist 번들
-3. PSI 기반 JPA 분석기 (`reference/ClassIndexer.java` 의 어노테이션 처리 로직을 PSI 로 포팅)
-4. ERD 노드 클릭 → 소스 점프
+1. ~~`idea-plugin/` 모듈 추가~~ ✓
+2. ~~ToolWindow + JCEF 패널 + viewer dist 번들~~ ✓
+3. PSI 기반 JPA 분석기 (`reference/ClassIndexer.java` 의 어노테이션 처리 로직을 PSI 로 포팅) → `Jpa3dRequestHandler` 의 스텁을 채우기
+4. ERD 노드 클릭 → 소스 점프 (`NavigationUtil.activateFileWithPsiElement`)
+5. PSI 변경 리스너로 실시간 갱신

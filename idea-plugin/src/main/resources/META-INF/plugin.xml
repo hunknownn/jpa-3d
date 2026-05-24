@@ -1,0 +1,26 @@
+<idea-plugin>
+    <id>com.jpa3d</id>
+    <name>JPA 3D</name>
+    <vendor email="zhfptm12@gmail.com">hunknownn</vendor>
+
+    <description><![CDATA[
+        JPA Entity 모델을 3D / 2D ERD 로 시각화합니다.<br/>
+        <br/>
+        - 양방향 관계 자동 정리 (mappedBy 기준 owning side 만 표시)<br/>
+        - Spring Data Repository → Entity 매핑<br/>
+        - 컬럼/PK/유니크 등 컬럼 메타데이터 표시 (level 2)<br/>
+        - 노드 클릭 → 소스 점프 (예정)<br/>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+            id="JPA 3D"
+            anchor="right"
+            secondary="false"
+            icon="AllIcons.Toolwindows.ToolWindowHierarchy"
+            factoryClass="com.jpa3d.Jpa3dToolWindowFactory"/>
+    </extensions>
+</idea-plugin>

@@ -12,3 +12,8 @@ dist/
 # Build outputs
 build/
 out/
+
+# Gradle
+.gradle/
+.kotlin/
+.intellijPlatform/
