@@ -70,7 +70,7 @@ export async function fetchErd(opts: ErdRequest): Promise<GraphData> {
     return bridge.request("erd", opts) as Promise<GraphData>;
   }
   // 스탠드얼론 fallback: 미리 만들어둔 fixture
-  const res = await fetch("/fixtures/erd.json");
+  const res = await fetch("fixtures/erd.json");
   if (!res.ok) throw new Error(`fixture erd.json missing: ${res.status}`);
   return res.json();
 }
@@ -82,7 +82,7 @@ export async function searchErd(q: string, includeRepositories = true): Promise<
     return bridge.request("search", { q, includeRepositories }) as Promise<GraphNode[]>;
   }
   // 스탠드얼론 fallback: 전체 노드 목록에서 필터
-  const res = await fetch("/fixtures/erd.json");
+  const res = await fetch("fixtures/erd.json");
   if (!res.ok) return [];
   const data: GraphData = await res.json();
   const needle = q.toLowerCase();
