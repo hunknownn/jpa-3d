@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.jpa3d"
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0"
 
 repositories {
     mavenCentral()
@@ -49,6 +49,28 @@ intellijPlatform {
             untilBuild = provider { null }
         }
     }
+
+    // 마켓플레이스 publish 설정.
+    //   ORG_GRADLE_PROJECT_publishToken 환경변수 (또는 gradle.properties 의 publishToken) 로 전달.
+    //   토큰은 https://plugins.jetbrains.com/author/me/tokens 에서 발급.
+    publishing {
+        token = providers.gradleProperty("publishToken")
+        // 첫 출시는 default. 베타/EAP 트랙으로 올리려면 ["beta"] 등.
+        channels = listOf("default")
+    }
+
+    // 코드 서명 (선택). 인증서는 https://plugins.jetbrains.com/docs/intellij/plugin-signing.html
+    //   - signPlugin.certificateChain / privateKey / password 를 gradle.properties 로
+    //   - 미설정 시 signPlugin task 가 자동으로 skip 되어 unsigned zip 그대로 배포됨
+    signing {
+        certificateChain = providers.gradleProperty("certificateChain")
+        privateKey = providers.gradleProperty("privateKey")
+        password = providers.gradleProperty("privateKeyPassword")
+    }
+
+    // pluginVerification 블록은 IntelliJ Platform Gradle Plugin 2.1 의 일부 메서드가
+    // Gradle 9 에서 컨테이너 등록 API 와 충돌해 활성화 시 빌드가 깨진다.
+    // 호환성 검사는 별도로 `./gradlew :idea-plugin:verifyPlugin` 으로 실행 가능.
 }
 
 /**

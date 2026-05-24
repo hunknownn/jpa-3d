@@ -68,10 +68,46 @@ interface Jpa3dBridge {
 > Gradle 데몬은 JDK 21 을 사용한다 (`gradle.properties` 의 `org.gradle.java.home`).
 > Kotlin 컴파일러 IntelliJ 내장 utility 가 JDK 25 의 버전 문자열을 파싱 못해 막힌다.
 
+## JetBrains Marketplace 배포
+
+### 첫 출시 (수동)
+
+1. plugins.jetbrains.com 로그인 → **Upload plugin**
+2. `idea-plugin/build/distributions/idea-plugin-0.1.0.zip` 업로드
+3. Title / Description / Tags / Categories 설정 (plugin.xml 의 내용이 자동 반영됨)
+4. Screenshots (1280×800 권장, 3장 이상)
+5. 제출 → JetBrains 검수 (영업일 1~3일)
+
+### 이후 업데이트 (자동)
+
+```bash
+# https://plugins.jetbrains.com/author/me/tokens 에서 token 발급
+export ORG_GRADLE_PROJECT_publishToken="perm:..."
+
+# version 을 bump 한 뒤
+./gradlew :idea-plugin:publishPlugin
+```
+
+### 코드 서명 (선택)
+
+JetBrains 가 권장. `gradle.properties` 또는 환경변수:
+
+```properties
+certificateChain=...
+privateKey=...
+privateKeyPassword=...
+```
+
+미설정 시 unsigned 로 배포되며 marketplace 가 자체 서명을 추가.
+
+자세한 안내: https://plugins.jetbrains.com/docs/intellij/plugin-signing.html
+
 ## 다음 작업
 
 1. ~~`idea-plugin/` 모듈 추가~~ ✓
 2. ~~ToolWindow + JCEF 패널 + viewer dist 번들~~ ✓
-3. PSI 기반 JPA 분석기 (`reference/ClassIndexer.java` 의 어노테이션 처리 로직을 PSI 로 포팅) → `Jpa3dRequestHandler` 의 스텁을 채우기
-4. ERD 노드 클릭 → 소스 점프 (`NavigationUtil.activateFileWithPsiElement`)
-5. PSI 변경 리스너로 실시간 갱신
+3. ~~PSI 기반 JPA 분석기~~ ✓ (UAST 로 Kotlin 까지 지원)
+4. ~~Marketplace 메타데이터 / 아이콘 / publish 설정~~ ✓
+5. ERD 노드 클릭 → 소스 점프 (`NavigationUtil.activateFileWithPsiElement`)
+6. PSI 변경 리스너로 실시간 갱신
+7. 분석기 결과 캐싱 (PSI 변경 시 무효화) — 성능 개선

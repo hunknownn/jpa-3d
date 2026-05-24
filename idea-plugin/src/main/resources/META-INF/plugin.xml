@@ -1,16 +1,38 @@
 <idea-plugin>
     <id>com.jpa3d</id>
     <name>JPA 3D</name>
-    <vendor email="zhfptm12@gmail.com">hunknownn</vendor>
+    <vendor email="zhfptm12@gmail.com" url="https://github.com/hunknownn">hunknownn</vendor>
 
     <description><![CDATA[
-        JPA Entity 모델을 3D / 2D ERD 로 시각화합니다.<br/>
+        Visualize your JPA Entity model as an interactive 3D / 2D ERD inside the IDE.
+        <br/><br/>
+        <b>Features</b>
+        <ul>
+          <li><b>3D force-directed graph</b> &amp; <b>2D orthogonal ERD</b> (elkjs layered layout)</li>
+          <li>Cardinality detection for <code>@OneToMany</code>, <code>@ManyToOne</code>, <code>@OneToOne</code>, <code>@ManyToMany</code></li>
+          <li>Bidirectional relationship deduplication (drops <code>mappedBy</code> mirror edges)</li>
+          <li>Spring Data Repository → Entity mapping (<code>JpaRepository</code>, <code>CrudRepository</code>, etc.)</li>
+          <li>Column metadata: PK, nullable, unique, length, <code>@GeneratedValue</code> strategy</li>
+          <li><code>@MappedSuperclass</code> / <code>@Embeddable</code> visualization with <code>EXTENDS</code> edges</li>
+          <li>Java &amp; Kotlin support via UAST &mdash; handles Kotlin's annotation use-site targets transparently</li>
+          <li>Both <code>jakarta.persistence</code> and legacy <code>javax.persistence</code> packages</li>
+        </ul>
         <br/>
-        - 양방향 관계 자동 정리 (mappedBy 기준 owning side 만 표시)<br/>
-        - Spring Data Repository → Entity 매핑<br/>
-        - 컬럼/PK/유니크 등 컬럼 메타데이터 표시 (level 2)<br/>
-        - 노드 클릭 → 소스 점프 (예정)<br/>
+        Open the <b>JPA 3D</b> tool window on the right side after the project is indexed.
+        <br/><br/>
+        <i>한국어:</i> JPA Entity 모델을 IDE 안에서 3D / 2D ERD 로 시각화합니다.
+        Java/Kotlin, jakarta &amp; javax persistence, Spring Data Repository 매핑까지 자동 분석합니다.
     ]]></description>
+
+    <change-notes><![CDATA[
+        <b>0.1.0</b>
+        <ul>
+          <li>Initial release.</li>
+          <li>3D / 2D ERD views with elkjs orthogonal routing.</li>
+          <li>UAST-based analyzer for Java and Kotlin entities.</li>
+          <li>Spring Data Repository detection.</li>
+        </ul>
+    ]]></change-notes>
 
     <depends>com.intellij.modules.platform</depends>
     <depends>com.intellij.modules.java</depends>
