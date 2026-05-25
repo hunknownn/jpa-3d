@@ -120,6 +120,9 @@ export default function ErdView2D({
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState<{ x: number; y: number } | null>(null);
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
+  // 컬럼 row 위에 마우스가 올라온 entity. 그 entity 에 연결된 엣지를 강조.
+  // null 일 때는 평소대로.
+  const [hoverEntityId, setHoverEntityId] = useState<string | null>(null);
   const [rankdir, setRankdir] = useState<RankDir>("LR");
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT);
   // 노드별 사용자 조정 offset. 자동 레이아웃 결과 위에 누적된다.
@@ -265,7 +268,12 @@ export default function ErdView2D({
             if (!path || path.points.length < 2) return null;
             const color = RELATION_COLOR[l.relation] ?? "#94a3b8";
             const isHover = hoverEdge === key;
-            const edgeHl = !hlActive || isHighlighted(l.source) || isHighlighted(l.target);
+            // 두 가지 페이드 사유:
+            //  1) 검색 하이라이트 비활성 노드 사이 엣지
+            //  2) hoverEntityId 가 있는데 양 끝 모두 그 entity 가 아닌 엣지
+            const searchHl = !hlActive || isHighlighted(l.source) || isHighlighted(l.target);
+            const hoverHl = hoverEntityId == null || l.source === hoverEntityId || l.target === hoverEntityId;
+            const edgeHl = searchHl && hoverHl;
             // 양 끝 노드가 드래그된 경우 첫/끝 점만 offset 적용. 중간 bend points 는 유지.
             const sOff = nodeOffsets.get(l.source);
             const tOff = nodeOffsets.get(l.target);
@@ -335,7 +343,15 @@ export default function ErdView2D({
             const box = layout.nodes.get(n.id);
             if (!box) return null;
             const off = nodeOffsets.get(n.id);
-            const dimmed = hlActive && !isHighlighted(n.id);
+            // 검색 하이라이트로 dim
+            const searchDim = hlActive && !isHighlighted(n.id);
+            // hoverEntity 활성 시: hover 한 entity 본인과 그에 연결된 이웃만 강조, 나머지 dim
+            const hoverDim = hoverEntityId != null
+              && n.id !== hoverEntityId
+              && !data.links.some((l) =>
+                (l.source === hoverEntityId && l.target === n.id) ||
+                (l.target === hoverEntityId && l.source === n.id));
+            const dimmed = searchDim || hoverDim;
             return (
               <EntityCard
                 key={n.id}
@@ -344,6 +360,10 @@ export default function ErdView2D({
                 y={box.y + (off?.dy ?? 0)}
                 level={level}
                 dimmed={dimmed}
+                onColumnHover={(hovering) => {
+                  if (hovering) setHoverEntityId(n.id);
+                  else setHoverEntityId((cur) => (cur === n.id ? null : cur));
+                }}
                 onReseed={() => onNodeReseed(n)}
                 onDragStart={(clientX, clientY) => {
                   // outer div 의 mousemove/up 이 받아 처리. navigate 는 mouseup 시 movement 보고 결정.
@@ -545,11 +565,12 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
   };
 }
 
-function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart }: {
+function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumnHover }: {
   node: GraphNode; x: number; y: number; level: 1 | 2 | 3;
   dimmed?: boolean;
   onReseed: () => void;
   onDragStart: (clientX: number, clientY: number) => void;
+  onColumnHover?: (hovering: boolean) => void;
 }) {
   const isEntity = node.entity != null;
   const isMappedSuper = node.entity?.kind === "mappedSuperclass";
@@ -588,7 +609,14 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart }: {
         </text>
       )}
       {showColumns && node.entity!.columns.map((c, i) => (
-        <g key={c.fieldName} transform={`translate(0,${CARD_HEADER_H + i * ROW_H})`}>
+        <g
+          key={c.fieldName}
+          transform={`translate(0,${CARD_HEADER_H + i * ROW_H})`}
+          onMouseEnter={() => onColumnHover?.(true)}
+          onMouseLeave={() => onColumnHover?.(false)}
+        >
+          {/* 투명 hit area — 글자 사이 빈 공간에서도 hover 가 끊기지 않게 */}
+          <rect x={0} y={0} width={CARD_W} height={ROW_H} fill="transparent" />
           <text x={12} y={15} fill={c.primaryKey ? "#fbbf24" : "#e2e8f0"} fontSize={12}>
             {c.primaryKey ? "🔑 " : ""}{c.columnName ?? c.fieldName}
           </text>
