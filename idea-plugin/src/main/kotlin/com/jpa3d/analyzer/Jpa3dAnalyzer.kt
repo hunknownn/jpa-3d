@@ -8,6 +8,10 @@ import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiAnnotation
+import com.intellij.psi.PsiAnnotationMemberValue
+import com.intellij.psi.PsiArrayInitializerMemberValue
+import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiSubstitutor
 import com.intellij.psi.PsiType
 import com.intellij.psi.PsiTypeParameter
@@ -198,6 +202,10 @@ class Jpa3dAnalyzer(private val project: Project) {
         val columns = mutableListOf<ColumnInfo>()
         val relations = mutableListOf<GraphLink>()
 
+        // 클래스 레벨 @Table 의 indexes / uniqueConstraints 를 미리 모아둬서 buildColumn 에서 참조.
+        // 매칭은 db 컬럼명 lowercase 기준.
+        val (indexedCols, uniqueCols) = extractTableConstraints(c)
+
         for (f in c.fields) {
             // static (= Java static / Kotlin companion 등) 은 컬럼 아님
             val psiField = f.javaPsi as? PsiField
@@ -209,12 +217,67 @@ class Jpa3dAnalyzer(private val project: Project) {
                 buildRelationLink(owner, f, relAnnotation, knownEntityFqns)?.let { relations.add(it) }
                 continue
             }
-            columns.add(buildColumn(f))
+            columns.add(buildColumn(f, indexedCols, uniqueCols))
         }
         return FieldExtraction(columns, relations)
     }
 
-    private fun buildColumn(f: UField): ColumnInfo {
+    /**
+     * @Table 의 indexes / uniqueConstraints 에서 컬럼명 집합을 추출.
+     *
+     * UAnnotation 의 nested 배열 어노테이션 접근은 PSI 가 더 직접적이라 PSI 로 내려가서 읽는다.
+     *
+     * indexes: `@Index(columnList="email" | "a, b, c desc")` — 쉼표 분리, ASC/DESC 토큰 제거.
+     * uniqueConstraints: `@UniqueConstraint(columnNames={"email"})` — 문자열 배열.
+     *
+     * @return (indexedColumns, uniqueColumns) — 모두 lowercase 컬럼명 set
+     */
+    private fun extractTableConstraints(c: UClass): Pair<Set<String>, Set<String>> {
+        val tableAnn = c.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.TABLE }
+        val psi = tableAnn?.javaPsi as? PsiAnnotation ?: return Pair(emptySet(), emptySet())
+
+        val indexed = mutableSetOf<String>()
+        val unique = mutableSetOf<String>()
+
+        forEachNestedAnnotation(psi.findAttributeValue("indexes")) { ann ->
+            val colList = (ann.findAttributeValue("columnList") as? PsiLiteralExpression)?.value as? String ?: return@forEachNestedAnnotation
+            for (col in parseColumnList(colList)) indexed.add(col)
+        }
+
+        forEachNestedAnnotation(psi.findAttributeValue("uniqueConstraints")) { ann ->
+            collectStringArray(ann.findAttributeValue("columnNames"), unique)
+        }
+
+        return Pair(indexed, unique)
+    }
+
+    /** 배열 또는 단일 어노테이션 어느 쪽이든 element 어노테이션을 순회. */
+    private inline fun forEachNestedAnnotation(value: PsiAnnotationMemberValue?, block: (PsiAnnotation) -> Unit) {
+        when (value) {
+            is PsiArrayInitializerMemberValue -> value.initializers.forEach { (it as? PsiAnnotation)?.let(block) }
+            is PsiAnnotation -> block(value)
+            else -> Unit
+        }
+    }
+
+    /** 배열 또는 단일 문자열을 lowercase 로 [out] 에 추가. */
+    private fun collectStringArray(value: PsiAnnotationMemberValue?, out: MutableSet<String>) {
+        when (value) {
+            is PsiArrayInitializerMemberValue -> value.initializers.forEach {
+                ((it as? PsiLiteralExpression)?.value as? String)?.let { s -> out.add(s.lowercase()) }
+            }
+            is PsiLiteralExpression -> (value.value as? String)?.let { out.add(it.lowercase()) }
+            else -> Unit
+        }
+    }
+
+    /** `"a, b DESC, c"` → ["a", "b", "c"] (lowercase). */
+    private fun parseColumnList(s: String): List<String> =
+        s.split(",")
+            .map { it.trim().substringBefore(' ').lowercase() }
+            .filter { it.isNotEmpty() }
+
+    private fun buildColumn(f: UField, indexedCols: Set<String>, uniqueCols: Set<String>): ColumnInfo {
         val annotations = f.uAnnotations
         val isPk = annotations.any { it.qualifiedName in JpaAnnotations.ID }
         val columnAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.COLUMN }
@@ -222,11 +285,15 @@ class Jpa3dAnalyzer(private val project: Project) {
 
         val columnName = columnAnn?.stringAttr("name")
         val nullable = columnAnn?.boolAttr("nullable") ?: true
-        val unique = columnAnn?.boolAttr("unique") ?: false
+        val columnUnique = columnAnn?.boolAttr("unique") ?: false
         val length = columnAnn?.intAttr("length")
 
         // GeneratedValue.strategy 는 enum reference — UReferenceExpression 의 resolvedName 사용
         val strategy = generatedAnn?.findAttributeValue("strategy")?.let { extractEnumName(it) }
+
+        val dbName = (columnName ?: f.name).lowercase()
+        val tableUnique = dbName in uniqueCols
+        val indexed = dbName in indexedCols
 
         return ColumnInfo(
             fieldName = f.name,
@@ -234,7 +301,8 @@ class Jpa3dAnalyzer(private val project: Project) {
             javaType = f.type.canonicalText,
             primaryKey = isPk,
             nullable = nullable,
-            unique = unique,
+            unique = columnUnique || tableUnique,
+            indexed = indexed,
             length = length,
             generatedValue = strategy
         )

@@ -32,7 +32,10 @@ data class ColumnInfo(
     val javaType: String,
     val primaryKey: Boolean,
     val nullable: Boolean,
+    /** @Column(unique=true) 또는 @Table(uniqueConstraints=...) 에 의해 유니크. */
     val unique: Boolean,
+    /** @Table(indexes=...) 의 columnList 에 포함된 컬럼. PK 는 별도(고유 indexed=false 로 둠). */
+    val indexed: Boolean = false,
     val length: Int?,
     val generatedValue: String?
 )

@@ -10,6 +10,8 @@ export interface ColumnInfo {
   primaryKey: boolean;
   nullable: boolean;
   unique: boolean;
+  /** @Table(indexes=...) 의 columnList 에 포함된 컬럼. */
+  indexed?: boolean;
   length?: number | null;
   generatedValue?: string | null;
 }

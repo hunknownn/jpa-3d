@@ -656,8 +656,15 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
           <text x={12} y={15} fill={c.primaryKey ? "#fbbf24" : "#e2e8f0"} fontSize={12}>
             {c.primaryKey ? "🔑 " : ""}{c.columnName ?? c.fieldName}
           </text>
-          <text x={CARD_W - 12} y={15} fill="#94a3b8" fontSize={11} textAnchor="end">
-            {shortType(c.javaType)}{c.nullable ? "" : "*"}
+          {/*
+            우측 우편함: [unique ◆] [indexed #] type[* if not nullable]
+            - ◆ : @Column(unique) 또는 @Table(uniqueConstraints) 에 포함
+            - # : @Table(indexes) 의 columnList 에 포함 (PK 의 자동 index 는 제외)
+          */}
+          <text x={CARD_W - 12} y={15} fontSize={11} textAnchor="end">
+            {c.unique && <tspan fill="#fde047">◆ </tspan>}
+            {c.indexed && <tspan fill="#67e8f9"># </tspan>}
+            <tspan fill="#94a3b8">{shortType(c.javaType)}{c.nullable ? "" : "*"}</tspan>
           </text>
         </g>
       ))}
