@@ -203,6 +203,60 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
   return sprite;
 }
 
+// === 3D anchor + 카드 라벨 묶음 ===
+//
+// 노드 원점에 작은 3D sphere 를 둬서 회전·원근에 진짜 반응하는 깊이 단서를 제공한다.
+// 카드 sprite 는 sphere 위로 띄워 라벨처럼 동작 (여전히 빌보드, 항상 가독성 유지).
+// 엣지는 node origin = sphere 위치로 모임.
+
+const ANCHOR_RADIUS = 3;
+const ANCHOR_TO_CARD_GAP = 5;
+
+const ANCHOR_COLOR: Record<string, number> = {
+  entity: 0x3b82f6,           // blue
+  mappedSuperclass: 0x6366f1, // indigo
+  embeddable: 0x14b8a6,       // teal
+  repository: 0x22c55e        // green (entity == null)
+};
+
+function anchorColorFor(n: GraphNode): number {
+  if (n.entity == null) return ANCHOR_COLOR.repository;
+  return ANCHOR_COLOR[n.entity.kind] ?? ANCHOR_COLOR.entity;
+}
+
+function makeEntityCardObject(n: GraphNode, level: 1 | 2 | 3): THREE.Group {
+  const group = new THREE.Group();
+
+  // 3D anchor — Phong 으로 두면 ForceGraph3D 기본 조명 아래 음영이 생겨 회전 시 깊이감.
+  const sphereGeo = new THREE.SphereGeometry(ANCHOR_RADIUS, 18, 18);
+  const sphereMat = new THREE.MeshPhongMaterial({
+    color: anchorColorFor(n),
+    shininess: 40,
+    transparent: true
+  });
+  const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+  group.add(sphere);
+
+  // 카드 라벨 — sphere 상단 위로 띄움. sprite.position 은 sprite 중심 기준.
+  const sprite = makeEntityCardSprite(n, level);
+  const cardWorldH = sprite.scale.y;
+  sprite.position.y = ANCHOR_RADIUS + ANCHOR_TO_CARD_GAP + cardWorldH / 2;
+  group.add(sprite);
+
+  return group;
+}
+
+/** Group 의 모든 머티리얼에 opacity 를 적용 (sphere + sprite). */
+function setGroupOpacity(group: THREE.Group, opacity: number) {
+  group.traverse((obj) => {
+    const mat = (obj as any).material as THREE.Material | undefined;
+    if (mat && "opacity" in mat) {
+      (mat as any).transparent = true;
+      (mat as any).opacity = opacity;
+    }
+  });
+}
+
 const DIM_COLOR = "#1f2937";
 
 const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
@@ -240,15 +294,6 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     return () => clearTimeout(t);
   }, [data.seed, data.depth]);
 
-  // d3-force 파라미터 — 카드 sprite 가 sphere 보다 훨씬 커서 기본값(link distance ~30,
-  // charge ~-30) 으론 노드들이 서로 겹친다. 카드 폭(~57 unit) 보다 충분히 크게 잡음.
-  useEffect(() => {
-    const fg = fgRef.current as any;
-    if (!fg?.d3Force) return;
-    fg.d3Force("link")?.distance(140);
-    fg.d3Force("charge")?.strength(-260);
-    fg.d3ReheatSimulation?.();
-  }, [data]);
 
   // 마우스 버튼 매핑:
   //  - 휠 버튼 드래그: 기본 DOLLY(줌) → PAN(이동)
@@ -319,15 +364,17 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
       // 회전 대신 노드 끌기로 잡혀버리는 문제 회피. 배치는 force 시뮬레이션에 일임.
       enableNodeDrag={false}
 
-      // 노드를 카드 sprite 로 치환 (sphere 비활성). 검색 하이라이트 시 비매칭은 sprite 투명도를 낮춤.
+      // 노드를 (3D anchor sphere + 카드 sprite 라벨) Group 으로 치환.
+      // sphere 는 회전/원근에 반응하는 진짜 3D 객체라 깊이 단서 제공,
+      // 카드는 그 위에 떠 있는 빌보드 라벨로 가독성 유지.
       nodeThreeObjectExtend={false}
       nodeThreeObject={((n: any) => {
         const node = n as GraphNode;
-        const sprite = makeEntityCardSprite(node, level);
+        const obj = makeEntityCardObject(node, level);
         if (hlActive && !isHighlighted(node.id)) {
-          sprite.material.opacity = 0.18;
+          setGroupOpacity(obj, 0.18);
         }
-        return sprite;
+        return obj;
       }) as any}/>
   );
 });
