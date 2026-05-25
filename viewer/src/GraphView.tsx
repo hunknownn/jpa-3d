@@ -300,6 +300,9 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
       onNodeClick={(n: any) => onNodeSelect(n as GraphNode)}
       onNodeRightClick={(n: any) => onNodeReseed(n as GraphNode)}
       // 좌클릭: 소스로 점프 / 우클릭: 그 노드를 새 seed 로
+      // 노드 수동 드래그 비활성 — 카드 sprite 가 화면을 많이 덮어 드래그가
+      // 회전 대신 노드 끌기로 잡혀버리는 문제 회피. 배치는 force 시뮬레이션에 일임.
+      enableNodeDrag={false}
 
       // 노드를 카드 sprite 로 치환 (sphere 비활성). 검색 하이라이트 시 비매칭은 sprite 투명도를 낮춤.
       nodeThreeObjectExtend={false}
