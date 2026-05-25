@@ -240,6 +240,16 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     return () => clearTimeout(t);
   }, [data.seed, data.depth]);
 
+  // d3-force 파라미터 — 카드 sprite 가 sphere 보다 훨씬 커서 기본값(link distance ~30,
+  // charge ~-30) 으론 노드들이 서로 겹친다. 카드 폭(~57 unit) 보다 충분히 크게 잡음.
+  useEffect(() => {
+    const fg = fgRef.current as any;
+    if (!fg?.d3Force) return;
+    fg.d3Force("link")?.distance(140);
+    fg.d3Force("charge")?.strength(-260);
+    fg.d3ReheatSimulation?.();
+  }, [data]);
+
   // 마우스 버튼 매핑:
   //  - 휠 버튼 드래그: 기본 DOLLY(줌) → PAN(이동)
   //  - 좌클릭: grabMode 가 켜져있으면 PAN(이동), 아니면 ROTATE(회전)
