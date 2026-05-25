@@ -86,19 +86,24 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
   const ctx = canvas.getContext("2d")!;
   ctx.scale(CARD_DPR, CARD_DPR);
 
-  // 본체
-  ctx.fillStyle = "#1e293b";
+  // 본체 — rgba 로 반투명 채움. SpriteMaterial transparent=true 옵션은 텍스처의 알파를
+  // 살리겠다는 의미일 뿐이라, 보이는 투명도는 여기 fill alpha 가 결정.
+  // 텍스트는 그대로 불투명으로 그릴 것이라 가독성은 유지된다.
+  ctx.fillStyle = "rgba(30, 41, 59, 0.82)";
   roundRect(ctx, 0, 0, CARD_W, cardH, 6);
   ctx.fill();
-  ctx.strokeStyle = "#334155";
+  ctx.strokeStyle = "rgba(51, 65, 85, 0.9)";
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // 헤더 색 (kind 별)
+  // 헤더 색 (kind 별). 본체보다 살짝만 진하게 (alpha 0.88) — 위계 유지하면서 비침은 살림.
   const isEntity = n.entity != null;
   const isMappedSuper = n.entity?.kind === "mappedSuperclass";
   const isEmbeddable = n.entity?.kind === "embeddable";
-  const headerBg = isMappedSuper ? "#3730a3" : isEmbeddable ? "#0f766e" : isEntity ? "#1d4ed8" : "#1f8556";
+  const headerBg = isMappedSuper ? "rgba(55, 48, 163, 0.88)"
+    : isEmbeddable ? "rgba(15, 118, 110, 0.88)"
+    : isEntity ? "rgba(29, 78, 216, 0.88)"
+    : "rgba(31, 133, 86, 0.88)";
 
   ctx.save();
   ctx.beginPath();
