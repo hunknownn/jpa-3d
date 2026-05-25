@@ -110,6 +110,13 @@ export default function ErdApp() {
   const hasEntities = data.nodes.some((n) => n.entity != null);
   const showEmpty = !loading && !error && params.scope === "all" && !hasEntities;
 
+  // 검색어가 있고, 매칭이 1개 이상일 때만 하이라이트 활성.
+  // 비활성 시 undefined 를 넘겨 뷰가 평소처럼 렌더하게 한다.
+  const highlightedIds: Set<string> | undefined =
+    query.trim().length > 0 && suggests.length > 0
+      ? new Set(suggests.map((n) => n.id))
+      : undefined;
+
   function pickSeed(n: GraphNode) {
     // Repository 선택 시: 해당 Repository 가 가리키는 첫 Entity 를 seed 로
     if (n.entity == null) {
@@ -138,43 +145,53 @@ export default function ErdApp() {
         <LevelToggle value={params.level} onChange={(level) => setParams({ ...params, level })} />
         <ExtendsToggle value={params.showExtends} onChange={(showExtends) => setParams({ ...params, showExtends })} />
         <ViewToggle value={params.view} onChange={(view) => setParams({ ...params, view })} />
-        {params.scope === "seed" && (
-          <div style={{ position: "relative" }}>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Entity 또는 Repository 검색..."
+        <div style={{ position: "relative" }}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={params.scope === "seed" ? "seed 검색…" : "노드 검색 (하이라이트)"}
+            style={{
+              width: 280, padding: "4px 8px", fontSize: 13,
+              background: "#0f172a", color: "#e2e8f0",
+              border: "1px solid #475569", borderRadius: 4
+            }}
+          />
+          {query.trim() && (
+            <button
+              onClick={() => setQuery("")}
+              title="검색 초기화"
               style={{
-                width: 280, padding: "4px 8px", fontSize: 13,
-                background: "#0f172a", color: "#e2e8f0",
-                border: "1px solid #475569", borderRadius: 4
+                position: "absolute", right: 4, top: 3,
+                width: 22, height: 22, lineHeight: "20px", textAlign: "center",
+                background: "transparent", color: "#94a3b8",
+                border: "none", borderRadius: 4, cursor: "pointer", fontSize: 14
               }}
-            />
-            {suggests.length > 0 && (
-              <div style={{
-                position: "absolute", top: 28, left: 0, width: 360,
-                background: "#1e293b", border: "1px solid #475569", borderRadius: 4,
-                maxHeight: 240, overflowY: "auto", zIndex: 10
-              }}>
-                {suggests.map((n) => (
-                  <div
-                    key={n.id}
-                    onClick={() => pickSeed(n)}
-                    style={{
-                      padding: "6px 10px", cursor: "pointer",
-                      borderBottom: "1px solid #334155", fontSize: 12
-                    }}
-                  >
-                    <div>{n.name}</div>
-                    <div style={{ color: "#94a3b8", fontSize: 11 }}>
-                      {n.entity ? `Entity (${n.entity.kind})` : "Repository"} · {n.pkg}
-                    </div>
+            >×</button>
+          )}
+          {suggests.length > 0 && (
+            <div style={{
+              position: "absolute", top: 28, left: 0, width: 360,
+              background: "#1e293b", border: "1px solid #475569", borderRadius: 4,
+              maxHeight: 240, overflowY: "auto", zIndex: 10
+            }}>
+              {suggests.map((n) => (
+                <div
+                  key={n.id}
+                  onClick={() => pickSeed(n)}
+                  style={{
+                    padding: "6px 10px", cursor: "pointer",
+                    borderBottom: "1px solid #334155", fontSize: 12
+                  }}
+                >
+                  <div>{n.name}</div>
+                  <div style={{ color: "#94a3b8", fontSize: 11 }}>
+                    {n.entity ? `Entity (${n.entity.kind})` : "Repository"} · {n.pkg}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <div style={{ flex: 1 }} />
         <button
           onClick={() => setRefreshTick((t) => t + 1)}
@@ -207,6 +224,8 @@ export default function ErdApp() {
             width={size.w}
             height={size.h - 48}
             level={params.level}
+            highlightedIds={highlightedIds}
+            highlightBaseId={params.seed}
             onNodeReseed={(n) => pickSeed(n)}
             onNodeNavigate={(n) => navigateToSource(n.id)}
           />
@@ -216,6 +235,8 @@ export default function ErdApp() {
             data={data}
             width={size.w}
             height={size.h - 48}
+            highlightedIds={highlightedIds}
+            highlightBaseId={params.seed}
             onNodeSelect={(n) => navigateToSource(n.id)}
             onNodeReseed={(n) => pickSeed(n)}
           />

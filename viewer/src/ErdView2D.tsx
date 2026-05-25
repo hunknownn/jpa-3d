@@ -9,6 +9,10 @@ interface Props {
   level: 1 | 2 | 3;
   onNodeReseed: (n: GraphNode) => void;
   onNodeNavigate?: (n: GraphNode) => void;
+  /** 검색 매칭 노드 id 집합. 비어있지 않으면 비매칭 노드/엣지를 페이드한다. */
+  highlightedIds?: Set<string>;
+  /** 하이라이트 기준 노드(보통 현재 seed) — 항상 매칭으로 간주된다. */
+  highlightBaseId?: string;
 }
 
 const RELATION_LABEL: Partial<Record<Relation, string>> = {
@@ -105,7 +109,13 @@ interface NodeDrag {
 
 const CLICK_THRESHOLD_PX = 4;
 
-export default function ErdView2D({ data, width, height, level, onNodeReseed, onNodeNavigate }: Props) {
+export default function ErdView2D({
+  data, width, height, level, onNodeReseed, onNodeNavigate,
+  highlightedIds, highlightBaseId
+}: Props) {
+  const hlActive = !!highlightedIds && highlightedIds.size > 0;
+  const isHighlighted = (id: string): boolean =>
+    !!highlightedIds && (highlightedIds.has(id) || id === highlightBaseId);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState<{ x: number; y: number } | null>(null);
@@ -255,6 +265,7 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
             if (!path || path.points.length < 2) return null;
             const color = RELATION_COLOR[l.relation] ?? "#94a3b8";
             const isHover = hoverEdge === key;
+            const edgeHl = !hlActive || isHighlighted(l.source) || isHighlighted(l.target);
             // 양 끝 노드가 드래그된 경우 첫/끝 점만 offset 적용. 중간 bend points 는 유지.
             const sOff = nodeOffsets.get(l.source);
             const tOff = nodeOffsets.get(l.target);
@@ -270,6 +281,7 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
             return (
               <g
                 key={key}
+                opacity={edgeHl ? 1 : 0.15}
                 onMouseEnter={() => setHoverEdge(key)}
                 onMouseLeave={() => setHoverEdge((h) => (h === key ? null : h))}
               >
@@ -323,6 +335,7 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
             const box = layout.nodes.get(n.id);
             if (!box) return null;
             const off = nodeOffsets.get(n.id);
+            const dimmed = hlActive && !isHighlighted(n.id);
             return (
               <EntityCard
                 key={n.id}
@@ -330,6 +343,7 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
                 x={box.x + (off?.dx ?? 0)}
                 y={box.y + (off?.dy ?? 0)}
                 level={level}
+                dimmed={dimmed}
                 onReseed={() => onNodeReseed(n)}
                 onDragStart={(clientX, clientY) => {
                   // outer div 의 mousemove/up 이 받아 처리. navigate 는 mouseup 시 movement 보고 결정.
@@ -531,8 +545,9 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
   };
 }
 
-function EntityCard({ node, x, y, level, onReseed, onDragStart }: {
+function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart }: {
   node: GraphNode; x: number; y: number; level: 1 | 2 | 3;
+  dimmed?: boolean;
   onReseed: () => void;
   onDragStart: (clientX: number, clientY: number) => void;
 }) {
@@ -551,6 +566,7 @@ function EntityCard({ node, x, y, level, onReseed, onDragStart }: {
   return (
     <g
       transform={`translate(${x},${y})`}
+      opacity={dimmed ? 0.18 : 1}
       onMouseDown={(e) => {
         e.stopPropagation();  // 캔버스 팬 방지
         onDragStart(e.clientX, e.clientY);
