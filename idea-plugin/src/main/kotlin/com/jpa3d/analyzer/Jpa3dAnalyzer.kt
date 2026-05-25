@@ -290,13 +290,21 @@ class Jpa3dAnalyzer(private val project: Project) {
     }
 
     private fun buildRelationLabel(f: UField, mappedBy: String?): String {
+        // inverse side (mappedBy) 는 FK 가 반대편에 있어 우리 entity 에는 @JoinColumn 이 없는 게 정상
         if (!mappedBy.isNullOrBlank()) {
             return "${f.name} (mappedBy=$mappedBy)"
         }
+        // ManyToMany 등 join table 을 별도로 두는 경우
         val joinTable = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_TABLE }
         val joinTableName = joinTable?.stringAttr("name")
         if (joinTableName != null) {
             return "${f.name} (join: $joinTableName)"
+        }
+        // 단일 @JoinColumn → FK 컬럼명. (다중 컬럼 PK 케이스는 @JoinColumns 로 따로 처리)
+        val joinColumn = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_COLUMN }
+            ?.stringAttr("name")
+        if (joinColumn != null) {
+            return "${f.name} → $joinColumn"
         }
         return f.name
     }
