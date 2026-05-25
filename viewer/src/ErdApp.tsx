@@ -235,6 +235,7 @@ export default function ErdApp() {
             data={data}
             width={size.w}
             height={size.h - 48}
+            level={params.level}
             highlightedIds={highlightedIds}
             highlightBaseId={params.seed}
             onNodeSelect={(n) => navigateToSource(n.id)}
