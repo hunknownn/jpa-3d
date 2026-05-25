@@ -20,6 +20,43 @@ const RELATION_LABEL: Partial<Record<Relation, string>> = {
   USES_ENTITY: "uses"
 };
 
+/**
+ * Crow's foot 표기:
+ *  - 1 (cf-one): 수직 막대
+ *  - N (cf-many): 세 갈래 까마귀발
+ *
+ * 우리 모델에서는 관계가 source → target 방향으로 표기되므로:
+ *  - ONE_TO_MANY: source=1, target=N
+ *  - MANY_TO_ONE: source=N, target=1
+ *  - ONE_TO_ONE: 양쪽 1
+ *  - MANY_TO_MANY: 양쪽 N
+ *  - EXTENDS / USES_ENTITY: 카디널리티 없음 → 화살표 유지
+ */
+function sourceMarker(rel: Relation): string | null {
+  switch (rel) {
+    case "ONE_TO_MANY":
+    case "ONE_TO_ONE":
+      return "cf-one";
+    case "MANY_TO_ONE":
+    case "MANY_TO_MANY":
+      return "cf-many";
+    default:
+      return null;
+  }
+}
+function targetMarker(rel: Relation): string | null {
+  switch (rel) {
+    case "MANY_TO_ONE":
+    case "ONE_TO_ONE":
+      return "cf-one";
+    case "ONE_TO_MANY":
+    case "MANY_TO_MANY":
+      return "cf-many";
+    default:
+      return null;
+  }
+}
+
 const RELATION_COLOR: Partial<Record<Relation, string>> = {
   ONE_TO_MANY: "#10b981",
   MANY_TO_ONE: "#14b8a6",
@@ -166,9 +203,10 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
     >
       <svg width={width} height={height}>
         <defs>
+          {/* EXTENDS / USES_ENTITY 용 화살촉 — 카디널리티가 없는 관계 */}
           {Object.entries(RELATION_COLOR).map(([rel, color]) => (
             <marker
-              key={rel}
+              key={`arrow-${rel}`}
               id={`arrow-${rel}`}
               viewBox="0 0 10 10"
               refX={9} refY={5}
@@ -178,6 +216,36 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
               <path d="M 0 0 L 10 5 L 0 10 z" fill={color} />
             </marker>
           ))}
+          {/*
+            Crow's foot 마커.
+            - cf-one: 노드 측에 수직 막대 (cardinality 1)
+            - cf-many: 노드 측에 세 갈래 까마귀발 (cardinality N)
+            refX=0 → 마커의 (0, refY) 가 path 끝점에 정렬됨. 즉 path 끝에서
+            노드 쪽으로 +X 방향으로 그려진다.
+            orient="auto-start-reverse" → markerStart 일 때 자동으로 뒤집혀
+            same definition 으로 양 끝에 쓸 수 있다.
+            stroke="context-stroke" → 사용하는 path 의 stroke 색을 그대로 상속.
+          */}
+          <marker
+            id="cf-one"
+            viewBox="0 0 14 14"
+            refX={0} refY={7}
+            markerWidth={14} markerHeight={14}
+            orient="auto-start-reverse"
+          >
+            <line x1={8} y1={2} x2={8} y2={12} stroke="context-stroke" strokeWidth={1.6} />
+          </marker>
+          <marker
+            id="cf-many"
+            viewBox="0 0 14 14"
+            refX={0} refY={7}
+            markerWidth={14} markerHeight={14}
+            orient="auto-start-reverse"
+          >
+            <line x1={0} y1={7} x2={12} y2={0} stroke="context-stroke" strokeWidth={1.4} />
+            <line x1={0} y1={7} x2={12} y2={7} stroke="context-stroke" strokeWidth={1.4} />
+            <line x1={0} y1={7} x2={12} y2={14} stroke="context-stroke" strokeWidth={1.4} />
+          </marker>
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
           {/* 엣지 */}
@@ -211,7 +279,14 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
                   stroke={color}
                   strokeWidth={isHover ? 2.5 : 1.5}
                   opacity={0.85}
-                  markerEnd={`url(#arrow-${l.relation})`}
+                  markerStart={(() => {
+                    const m = sourceMarker(l.relation);
+                    return m ? `url(#${m})` : undefined;
+                  })()}
+                  markerEnd={(() => {
+                    const m = targetMarker(l.relation);
+                    return m ? `url(#${m})` : `url(#arrow-${l.relation})`;
+                  })()}
                 />
                 <text
                   x={labelPoint.x}
