@@ -8,6 +8,7 @@ interface Props {
   height: number;
   level: 1 | 2 | 3;
   onNodeReseed: (n: GraphNode) => void;
+  onNodeNavigate?: (n: GraphNode) => void;
 }
 
 const RELATION_LABEL: Partial<Record<Relation, string>> = {
@@ -55,7 +56,7 @@ const elk = new ELK();
  * `layered` 알고리즘 + `ORTHOGONAL` 엣지 라우팅으로 직교(꺾인) 경로를 그린다.
  * 방향은 LR/TB 토글. 엣지 교차/겹침은 elkjs 가 dagre 보다 잘 처리한다.
  */
-export default function ErdView2D({ data, width, height, level, onNodeReseed }: Props) {
+export default function ErdView2D({ data, width, height, level, onNodeReseed, onNodeNavigate }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState<{ x: number; y: number } | null>(null);
@@ -188,6 +189,7 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed }: 
                 y={box.y}
                 level={level}
                 onReseed={() => onNodeReseed(n)}
+                onNavigate={onNodeNavigate ? () => onNodeNavigate(n) : undefined}
               />
             );
           })}
@@ -307,12 +309,19 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
       "elk.direction": direction,
       "elk.edgeRouting": "ORTHOGONAL",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
-      "elk.layered.spacing.nodeNodeBetweenLayers": "80",
-      "elk.spacing.nodeNode": "40",
-      "elk.spacing.edgeNode": "20",
-      "elk.spacing.edgeEdge": "15",
+      // 레이어 간 간격을 늘려 엣지가 비스킵 노드 본체를 우회할 공간 확보
+      "elk.layered.spacing.nodeNodeBetweenLayers": "120",
+      "elk.spacing.nodeNode": "60",
+      // edge-node 간격이 좁으면 라우터가 노드 본체를 통과하는 경로를 선택할 수 있음
+      "elk.spacing.edgeNode": "40",
+      "elk.spacing.edgeEdge": "20",
+      "elk.layered.spacing.edgeNodeBetweenLayers": "40",
+      "elk.layered.spacing.edgeEdgeBetweenLayers": "20",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
       "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
+      // 직선화 우선 — bend 가 줄고, 노드를 가로지르는 segment 발생률도 감소
+      "elk.layered.nodePlacement.bk.edgeStraightening": "IMPROVE_STRAIGHTNESS",
+      "elk.layered.unnecessaryBendpoints": "true",
       "elk.padding": "[top=30,left=30,bottom=30,right=30]"
     },
     children,
@@ -361,8 +370,10 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
   };
 }
 
-function EntityCard({ node, x, y, level, onReseed }: {
-  node: GraphNode; x: number; y: number; level: 1 | 2 | 3; onReseed: () => void;
+function EntityCard({ node, x, y, level, onReseed, onNavigate }: {
+  node: GraphNode; x: number; y: number; level: 1 | 2 | 3;
+  onReseed: () => void;
+  onNavigate?: () => void;
 }) {
   const isEntity = node.entity != null;
   const isMappedSuper = node.entity?.kind === "mappedSuperclass";
@@ -373,7 +384,12 @@ function EntityCard({ node, x, y, level, onReseed }: {
   const h = cardHeight(node, level);
 
   return (
-    <g transform={`translate(${x},${y})`} onContextMenu={(e) => { e.preventDefault(); onReseed(); }}>
+    <g
+      transform={`translate(${x},${y})`}
+      onClick={onNavigate}
+      onContextMenu={(e) => { e.preventDefault(); onReseed(); }}
+      style={{ cursor: onNavigate ? "pointer" : "default" }}
+    >
       <rect width={CARD_W} height={h} rx={6} fill="#1e293b" stroke="#334155" />
       <rect width={CARD_W} height={CARD_HEADER_H} rx={6} fill={headerBg} />
       <text x={10} y={16} fill="#f1f5f9" fontSize={13} fontWeight={600}>{node.name}</text>

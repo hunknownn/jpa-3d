@@ -3,10 +3,14 @@ package com.jpa3d
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.module.kotlin.KotlinModule
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
-import com.jpa3d.analyzer.Jpa3dAnalyzer
+import com.intellij.psi.JavaPsiFacade
+import com.intellij.psi.search.GlobalSearchScope
+import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphNode
 
@@ -34,6 +38,7 @@ class Jpa3dRequestHandler(private val project: Project) {
             when (req.kind) {
                 "erd" -> handleErd()
                 "search" -> handleSearch(req.args)
+                "navigate" -> handleNavigate(req.args)
                 else -> "[]"
             }
         } catch (e: Exception) {
@@ -47,7 +52,7 @@ class Jpa3dRequestHandler(private val project: Project) {
             log.info("dumb mode — returning empty graph")
             return EMPTY_ERD_JSON
         }
-        val graph = Jpa3dAnalyzer(project).analyze()
+        val graph = project.service<Jpa3dAnalysisCache>().getGraphData()
         return mapper.writeValueAsString(graph)
     }
 
@@ -57,13 +62,37 @@ class Jpa3dRequestHandler(private val project: Project) {
         if (q.isEmpty()) return "[]"
         val includeRepositories = (args?.get("includeRepositories") as? Boolean) ?: true
 
-        val graph: GraphData = Jpa3dAnalyzer(project).analyze()
+        val graph: GraphData = project.service<Jpa3dAnalysisCache>().getGraphData()
         val needle = q.lowercase()
         val hits: List<GraphNode> = graph.nodes.filter { n ->
             (includeRepositories || n.entity != null) &&
                 (n.name.lowercase().contains(needle) || n.id.lowercase().contains(needle))
         }
         return mapper.writeValueAsString(hits)
+    }
+
+    /**
+     * 노드 클릭 시 IDE 의 해당 소스로 점프.
+     *
+     * - FQN 으로 [PsiClass] 조회 (read action) → EDT 에서 navigate.
+     * - dumb mode 에선 인덱스 없이 못 찾을 수 있으니 그 경우 그냥 무시.
+     */
+    private fun handleNavigate(args: Map<String, Any?>?): String {
+        val fqn = (args?.get("fqn") as? String)?.trim().orEmpty()
+        if (fqn.isEmpty()) return "{\"ok\":false}"
+        if (DumbService.isDumb(project)) return "{\"ok\":false,\"reason\":\"dumb\"}"
+
+        // PSI 접근은 read action 안에서. navigate 호출은 EDT 에서.
+        val psiClass = com.intellij.openapi.application.ReadAction.compute<com.intellij.psi.PsiClass?, RuntimeException> {
+            JavaPsiFacade.getInstance(project).findClass(fqn, GlobalSearchScope.allScope(project))
+        } ?: return "{\"ok\":false,\"reason\":\"not_found\"}"
+
+        ApplicationManager.getApplication().invokeLater {
+            if (psiClass.canNavigate()) {
+                psiClass.navigate(true)
+            }
+        }
+        return "{\"ok\":true}"
     }
 
     /** 브리지 페이로드: `{"kind":"...","args":{...}}` */

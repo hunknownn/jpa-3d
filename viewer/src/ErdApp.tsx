@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import GraphView, { GraphHandle } from "./GraphView";
 import ErdView2D from "./ErdView2D";
-import { fetchErd, searchErd } from "./api";
+import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
 
 type Scope = "all" | "seed";
@@ -187,6 +187,7 @@ export default function ErdApp() {
             height={size.h - 48}
             level={params.level}
             onNodeReseed={(n) => pickSeed(n)}
+            onNodeNavigate={(n) => navigateToSource(n.id)}
           />
         ) : (
           <GraphView
@@ -194,7 +195,7 @@ export default function ErdApp() {
             data={data}
             width={size.w}
             height={size.h - 48}
-            onNodeSelect={() => { /* TODO: 노드 상세 패널 */ }}
+            onNodeSelect={(n) => navigateToSource(n.id)}
             onNodeReseed={(n) => pickSeed(n)}
           />
         )}
