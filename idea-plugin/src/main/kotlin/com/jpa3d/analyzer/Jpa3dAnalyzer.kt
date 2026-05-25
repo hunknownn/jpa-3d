@@ -8,9 +8,12 @@ import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiSubstitutor
+import com.intellij.psi.PsiType
+import com.intellij.psi.PsiTypeParameter
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.AnnotatedElementsSearch
-import com.intellij.psi.search.searches.DirectClassInheritorsSearch
+import com.intellij.psi.search.searches.ClassInheritorsSearch
 import com.jpa3d.model.ColumnInfo
 import com.jpa3d.model.EntityInfo
 import com.jpa3d.model.EntityKind
@@ -58,12 +61,15 @@ class Jpa3dAnalyzer(private val project: Project) {
         scanAnnotated(JpaAnnotations.EMBEDDABLE, facade, classpathScope, scope, EntityKind.EMBEDDABLE, entityClasses)
 
         // === Repository 후보 수집 ===
+        // ClassInheritorsSearch(checkDeep=true) 로 다단계 상속도 포착.
+        // 예: UserRepo extends MyBaseRepo<User>, MyBaseRepo<T> extends JpaRepository<T, ID>
         for (markerFqn in SpringDataRepositories.MARKERS) {
             val marker = facade.findClass(markerFqn, classpathScope) ?: continue
-            DirectClassInheritorsSearch.search(marker, scope).forEach { psi ->
+            ClassInheritorsSearch.search(marker, scope, true).forEach { psi ->
                 val uClass = psi.toUElementOfType<UClass>() ?: return@forEach
                 val fqn = uClass.qualifiedName ?: return@forEach
                 if (entityClasses.containsKey(fqn) || repositoryClasses.containsKey(fqn)) return@forEach
+                // 제네릭 베이스 (예: MyBaseRepo<T>) 는 첫 type arg 가 PsiTypeParameter 로 풀려 null 반환 → 스킵
                 val target = repositoryTargetEntity(uClass) ?: return@forEach
                 repositoryClasses[fqn] = RepositoryRecord(uClass, target)
             }
@@ -123,20 +129,55 @@ class Jpa3dAnalyzer(private val project: Project) {
     }
 
     /**
-     * Spring Data Repository 직접 상속만 검사 (예: `interface Foo : JpaRepository<User, Long>`).
-     * 첫 번째 generic 인자(Entity FQN) 를 돌려준다.
+     * Spring Data Repository 의 대상 Entity FQN.
+     *
+     * 다단계 상속 지원:
+     *   `interface UserRepo : MyBaseRepo<User>`,
+     *   `interface MyBaseRepo<T> : JpaRepository<T, Long>`
+     *   → UserRepo 의 대상은 User.
+     *
+     * 슈퍼타입을 BFS 로 따라가며 [PsiSubstitutor] 로 타입 매개변수 치환을 누적한다.
+     * 마커 인터페이스에 도달하면 그 시점의 substitutor 로 marker 의 첫 type parameter 를
+     * 풀어 entity FQN 으로 변환.
+     *
+     * 풀린 타입이 여전히 [PsiTypeParameter] 라면 (제네릭 베이스 자체) null 을 돌려 호출측에서 스킵.
      */
     private fun repositoryTargetEntity(c: UClass): String? {
         val psi = c.javaPsi
         if (!psi.isInterface) return null
-        for (superType in psi.extendsListTypes + psi.implementsListTypes) {
+        val seen = mutableSetOf<String>()
+        return resolveRepositoryTarget(psi, PsiSubstitutor.EMPTY, seen)
+    }
+
+    private fun resolveRepositoryTarget(
+        c: PsiClass,
+        sub: PsiSubstitutor,
+        seen: MutableSet<String>
+    ): String? {
+        val fqn = c.qualifiedName
+        if (fqn != null && !seen.add(fqn)) return null
+
+        for (superType in c.extendsListTypes + c.implementsListTypes) {
             val superClass = superType.resolve() ?: continue
-            val q = superClass.qualifiedName ?: continue
-            if (q !in SpringDataRepositories.MARKERS) continue
-            val parameters = superType.parameters
-            if (parameters.isEmpty()) continue
-            val first = parameters[0] as? PsiClassType ?: continue
-            return first.resolve()?.qualifiedName
+            val superFqn = superClass.qualifiedName ?: continue
+
+            // 1) superType 의 type args 에 현재 substitutor 를 적용해 풀어낸다.
+            // substitute 가 null 을 줄 수 있어 원본 type 으로 폴백.
+            val resolvedArgs: Array<PsiType> = superType.parameters
+                .map { sub.substitute(it) ?: it }
+                .toTypedArray()
+
+            // 2) marker 에 도달했으면 첫 인자가 대상 entity
+            if (superFqn in SpringDataRepositories.MARKERS) {
+                val first = resolvedArgs.firstOrNull() as? PsiClassType ?: continue
+                val resolved = first.resolve() ?: continue
+                if (resolved is PsiTypeParameter) continue  // 제네릭 베이스 → 미해결
+                return resolved.qualifiedName
+            }
+
+            // 3) 마커 아니면 더 깊이 — superClass 의 type param 을 풀린 인자로 매핑한 substitutor 로 재귀
+            val nextSub = PsiSubstitutor.EMPTY.putAll(superClass, resolvedArgs)
+            resolveRepositoryTarget(superClass, nextSub, seen)?.let { return it }
         }
         return null
     }
