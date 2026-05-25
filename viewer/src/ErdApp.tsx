@@ -14,6 +14,7 @@ interface ErdParams {
   level: Level;
   depth: number;
   view: ViewMode;
+  showExtends: boolean;
 }
 
 const EMPTY_DATA: GraphData = { seed: "", depth: 0, nodes: [], links: [] };
@@ -29,7 +30,9 @@ function readParamsFromHash(): ErdParams {
   const depth = parseInt(p.get("depth") ?? "2", 10);
   const seed = p.get("seed") ?? undefined;
   const view: ViewMode = p.get("view") === "2d" ? "2d" : "3d";
-  return { scope, seed, level, depth: Number.isFinite(depth) ? depth : 2, view };
+  // showExtends 미지정이면 기본 true (기존 동작 유지)
+  const showExtends = p.get("extends") !== "0";
+  return { scope, seed, level, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
 }
 
 function writeParamsToHash(params: ErdParams) {
@@ -37,6 +40,7 @@ function writeParamsToHash(params: ErdParams) {
   p.set("scope", params.scope);
   p.set("level", String(params.level));
   p.set("view", params.view);
+  if (!params.showExtends) p.set("extends", "0");
   if (params.scope === "seed") {
     if (params.seed) p.set("seed", params.seed);
     p.set("depth", String(params.depth));
@@ -82,7 +86,8 @@ export default function ErdApp() {
       scope: params.scope,
       seed: params.seed,
       depth: params.depth,
-      level: params.level
+      level: params.level,
+      showExtends: params.showExtends
     })
       .then(setData)
       .catch((e) => setError(String(e?.message ?? e)))
@@ -131,6 +136,7 @@ export default function ErdApp() {
       }}>
         <ScopeToggle value={params.scope} onChange={(scope) => setParams({ ...params, scope })} />
         <LevelToggle value={params.level} onChange={(level) => setParams({ ...params, level })} />
+        <ExtendsToggle value={params.showExtends} onChange={(showExtends) => setParams({ ...params, showExtends })} />
         <ViewToggle value={params.view} onChange={(view) => setParams({ ...params, view })} />
         {params.scope === "seed" && (
           <div style={{ position: "relative" }}>
@@ -235,6 +241,14 @@ function LevelToggle({ value, onChange }: { value: Level; onChange: (v: Level) =
       <SegBtn active={value === 1} onClick={() => onChange(1)}>관계만</SegBtn>
       <SegBtn active={value === 2} onClick={() => onChange(2)}>+컬럼</SegBtn>
       <SegBtn active={value === 3} onClick={() => onChange(3)}>+Repository</SegBtn>
+    </div>
+  );
+}
+
+function ExtendsToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      <SegBtn active={value} onClick={() => onChange(!value)}>상속 {value ? "ON" : "OFF"}</SegBtn>
     </div>
   );
 }

@@ -19,6 +19,8 @@ export interface ErdRequest {
   seed?: string;
   depth?: number;
   level: 1 | 2 | 3;
+  /** EXTENDS (상속/MappedSuperclass) 관계 표시 여부. 기본 true. */
+  showExtends?: boolean;
 }
 
 interface Jpa3dBridge {
