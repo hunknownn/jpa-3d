@@ -653,8 +653,11 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
         >
           {/* 투명 hit area — 글자 사이 빈 공간에서도 hover 가 끊기지 않게 */}
           <rect x={0} y={0} width={CARD_W} height={ROW_H} fill="transparent" />
-          <text x={12} y={15} fill={c.primaryKey ? "#fbbf24" : "#e2e8f0"} fontSize={12}>
-            {c.primaryKey ? "🔑 " : ""}{c.columnName ?? c.fieldName}
+          <text
+            x={12} y={15} fontSize={12}
+            fill={c.primaryKey ? "#fbbf24" : c.foreignKey ? "#7dd3fc" : "#e2e8f0"}
+          >
+            {c.primaryKey ? "🔑 " : c.foreignKey ? "🔗 " : ""}{c.columnName ?? c.fieldName}
           </text>
           {/*
             우측 우편함: [unique ◆] [indexed #] type[* if not nullable]

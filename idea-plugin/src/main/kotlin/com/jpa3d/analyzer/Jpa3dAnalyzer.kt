@@ -214,12 +214,58 @@ class Jpa3dAnalyzer(private val project: Project) {
 
             val relAnnotation = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.RELATION_ANNOTATIONS }
             if (relAnnotation != null) {
-                buildRelationLink(owner, f, relAnnotation, knownEntityFqns)?.let { relations.add(it) }
+                val link = buildRelationLink(owner, f, relAnnotation, knownEntityFqns)
+                if (link != null) {
+                    relations.add(link)
+                    // owning side ManyToOne/OneToOne 은 실제 DB 에 FK 컬럼이 생기므로 표 표기용
+                    // ColumnInfo 도 함께 emit. (OneToMany mappedBy / ManyToMany join table 은 제외)
+                    buildFkColumn(f, relAnnotation, link)?.let { columns.add(it) }
+                }
                 continue
             }
             columns.add(buildColumn(f, indexedCols, uniqueCols))
         }
         return FieldExtraction(columns, relations)
+    }
+
+    /**
+     * owning side relation 필드를 FK 컬럼으로 변환.
+     *
+     *  - ManyToOne: 항상 owning. FK 가 이쪽에.
+     *  - OneToOne: mappedBy 없으면 owning. (mappedBy 있으면 inverse 라 FK 반대편)
+     *  - OneToMany / ManyToMany: 이쪽에 FK 컬럼이 안 생기므로 null.
+     *
+     * 컬럼명: `@JoinColumn(name=...)` 명시값 → 없으면 JPA 기본 `fieldName + "_id"`.
+     * nullable / unique 는 @JoinColumn 속성 그대로.
+     */
+    private fun buildFkColumn(f: UField, relAnn: UAnnotation, link: GraphLink): ColumnInfo? {
+        val qn = relAnn.qualifiedName
+        val owningRelation = when {
+            qn in JpaAnnotations.MANY_TO_ONE -> true
+            qn in JpaAnnotations.ONE_TO_ONE -> relAnn.stringAttr("mappedBy").isNullOrBlank()
+            else -> false
+        }
+        if (!owningRelation) return null
+
+        val joinCol = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_COLUMN }
+        val explicitName = joinCol?.stringAttr("name")
+        val fkName = explicitName ?: "${f.name}_id"
+        val nullable = joinCol?.boolAttr("nullable") ?: true
+        val unique = joinCol?.boolAttr("unique") ?: (qn in JpaAnnotations.ONE_TO_ONE)
+
+        return ColumnInfo(
+            fieldName = f.name,
+            columnName = fkName,
+            javaType = f.type.canonicalText,
+            primaryKey = false,
+            nullable = nullable,
+            unique = unique,
+            indexed = false,
+            foreignKey = true,
+            fkTarget = link.target,
+            length = null,
+            generatedValue = null
+        )
     }
 
     /**

@@ -36,6 +36,10 @@ data class ColumnInfo(
     val unique: Boolean,
     /** @Table(indexes=...) 의 columnList 에 포함된 컬럼. PK 는 별도(고유 indexed=false 로 둠). */
     val indexed: Boolean = false,
+    /** @ManyToOne / @OneToOne(owning side) 의 FK 컬럼. 엣지로도 함께 emit 되며 여긴 표 표기용. */
+    val foreignKey: Boolean = false,
+    /** FK 가 참조하는 entity FQN. foreignKey=true 일 때만. */
+    val fkTarget: String? = null,
     val length: Int?,
     val generatedValue: String?
 )

@@ -162,10 +162,10 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
   const colsStartY = CARD_HEADER_H + inhH;
   cols.forEach((c, i) => {
     const y = colsStartY + i * CARD_ROW_H + CARD_ROW_H / 2;
-    ctx.fillStyle = c.primaryKey ? "#fbbf24" : "#e2e8f0";
+    ctx.fillStyle = c.primaryKey ? "#fbbf24" : c.foreignKey ? "#7dd3fc" : "#e2e8f0";
     ctx.font = `12px ${CARD_FONT}`;
     ctx.textAlign = "left";
-    const namePrefix = c.primaryKey ? "🔑 " : "";
+    const namePrefix = c.primaryKey ? "🔑 " : c.foreignKey ? "🔗 " : "";
     ctx.fillText(namePrefix + (c.columnName ?? c.fieldName), 12, y);
 
     // 우측: [unique ◆][indexed #] type[* if not nullable]. 오른쪽부터 거꾸로 그려 측정한 너비만큼 좌측으로 이동.

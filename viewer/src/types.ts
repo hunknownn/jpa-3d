@@ -12,6 +12,10 @@ export interface ColumnInfo {
   unique: boolean;
   /** @Table(indexes=...) 의 columnList 에 포함된 컬럼. */
   indexed?: boolean;
+  /** @ManyToOne / @OneToOne(owning) 의 FK 컬럼. 엣지도 함께 존재. */
+  foreignKey?: boolean;
+  /** FK 가 가리키는 entity FQN. foreignKey=true 일 때만. */
+  fkTarget?: string | null;
   length?: number | null;
   generatedValue?: string | null;
 }
