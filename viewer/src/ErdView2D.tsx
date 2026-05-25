@@ -29,9 +29,9 @@ const RELATION_COLOR: Partial<Record<Relation, string>> = {
   USES_ENTITY: "#eab308"
 };
 
-const CARD_W = 220;
-const CARD_HEADER_H = 36;
-const ROW_H = 18;
+const CARD_W = 260;
+const CARD_HEADER_H = 32;
+const ROW_H = 20;
 
 type RankDir = "LR" | "TB";
 
@@ -379,9 +379,13 @@ function EntityCard({ node, x, y, level, onReseed, onNavigate }: {
   const isMappedSuper = node.entity?.kind === "mappedSuperclass";
   const isEmbeddable = node.entity?.kind === "embeddable";
   const headerBg = isMappedSuper ? "#3730a3" : isEmbeddable ? "#0f766e" : isEntity ? "#1d4ed8" : "#475569";
-  const tableLine = node.entity?.tableName ?? node.name;
   const showColumns = level >= 2 && isEntity && node.entity!.columns.length > 0;
   const h = cardHeight(node, level);
+
+  // 테이블명이 클래스명과 다른 entity 만 우측에 표 이름을 작게 부기.
+  // Repository / 동명 테이블 entity 는 한 줄(이름) 만 표시.
+  const tableName = node.entity?.tableName;
+  const showTableBadge = isEntity && tableName != null && tableName.toLowerCase() !== node.name.toLowerCase();
 
   return (
     <g
@@ -392,16 +396,23 @@ function EntityCard({ node, x, y, level, onReseed, onNavigate }: {
     >
       <rect width={CARD_W} height={h} rx={6} fill="#1e293b" stroke="#334155" />
       <rect width={CARD_W} height={CARD_HEADER_H} rx={6} fill={headerBg} />
-      <text x={10} y={16} fill="#f1f5f9" fontSize={13} fontWeight={600}>{node.name}</text>
-      <text x={10} y={30} fill="#cbd5e1" fontSize={10}>
-        {isEntity ? `${tableLine}` : "Repository"}
+      <text x={12} y={CARD_HEADER_H / 2 + 5} fill="#f1f5f9" fontSize={15} fontWeight={600}>
+        {node.name}
       </text>
+      {showTableBadge && (
+        <text
+          x={CARD_W - 12} y={CARD_HEADER_H / 2 + 4}
+          fill="#cbd5e1" fontSize={11} textAnchor="end" fontStyle="italic"
+        >
+          {tableName}
+        </text>
+      )}
       {showColumns && node.entity!.columns.map((c, i) => (
         <g key={c.fieldName} transform={`translate(0,${CARD_HEADER_H + i * ROW_H})`}>
-          <text x={10} y={14} fill={c.primaryKey ? "#fbbf24" : "#e2e8f0"} fontSize={11}>
+          <text x={12} y={15} fill={c.primaryKey ? "#fbbf24" : "#e2e8f0"} fontSize={12}>
             {c.primaryKey ? "🔑 " : ""}{c.columnName ?? c.fieldName}
           </text>
-          <text x={CARD_W - 10} y={14} fill="#94a3b8" fontSize={10} textAnchor="end">
+          <text x={CARD_W - 12} y={15} fill="#94a3b8" fontSize={11} textAnchor="end">
             {shortType(c.javaType)}{c.nullable ? "" : "*"}
           </text>
         </g>
