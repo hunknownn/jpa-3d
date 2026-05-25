@@ -55,6 +55,7 @@ export default function ErdApp() {
   const [suggests, setSuggests] = useState<GraphNode[]>([]);
   const [query, setQuery] = useState(params.seed ?? "");
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const [refreshTick, setRefreshTick] = useState(0);
   const graphRef = useRef<GraphHandle>(null);
 
   // 윈도우 리사이즈
@@ -64,12 +65,19 @@ export default function ErdApp() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  // plugin 측에서 PSI 변경 시 jpa3d:invalidate 이벤트를 보낸다 → tick 증가시켜 fetch 재실행
+  useEffect(() => {
+    const onInvalidate = () => setRefreshTick((t) => t + 1);
+    window.addEventListener("jpa3d:invalidate", onInvalidate);
+    return () => window.removeEventListener("jpa3d:invalidate", onInvalidate);
+  }, []);
+
   // URL ↔ state 동기화
   useEffect(() => {
     writeParamsToHash(params);
   }, [params]);
 
-  // ERD 데이터 fetch
+  // ERD 데이터 fetch — params 변경 또는 invalidate 이벤트(refreshTick) 시 재실행
   useEffect(() => {
     if (params.scope === "seed" && !params.seed) {
       setData(EMPTY_DATA);
@@ -86,7 +94,7 @@ export default function ErdApp() {
       .then(setData)
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
-  }, [params]);
+  }, [params, refreshTick]);
 
   // 검색
   useEffect(() => {

@@ -1,6 +1,7 @@
 package com.jpa3d
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
@@ -8,6 +9,8 @@ import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.intellij.util.Alarm
+import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.SwingConstants
@@ -32,6 +35,8 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
 
     private val log = logger<Jpa3dViewerPanel>()
     private val handler = Jpa3dRequestHandler(project)
+    private val invalidationAlarm = Alarm(Alarm.ThreadToUse.SWING_THREAD, this)
+    private var browserRef: JBCefBrowser? = null
 
     val component: JComponent
 
@@ -41,6 +46,12 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
         } else {
             val browser = JBCefBrowser()
             Disposer.register(this, browser)
+            browserRef = browser
+
+            // 분석 캐시 무효화 → viewer 자동 새로고침
+            project.service<Jpa3dAnalysisCache>().addInvalidationListener(this) {
+                scheduleInvalidationPush()
+            }
 
             val jsQuery = JBCefJSQuery.create(browser as JBCefBrowserBase)
             Disposer.register(this, jsQuery)
@@ -77,12 +88,36 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
         </body></html>
     """.trimIndent()
 
+    /**
+     * PSI 변경 burst 를 흡수해 한 번만 viewer 에 push.
+     *
+     * 사용자가 키를 빠르게 치면 PsiTreeChangeEvent 가 수십 번 떨어진다. Alarm 으로
+     * "마지막 변경 후 [DEBOUNCE_MS]" 가 안정되면 한 번만 push.
+     */
+    private fun scheduleInvalidationPush() {
+        invalidationAlarm.cancelAllRequests()
+        invalidationAlarm.addRequest({ pushInvalidationToViewer() }, DEBOUNCE_MS)
+    }
+
+    private fun pushInvalidationToViewer() {
+        val cef = browserRef?.cefBrowser ?: return
+        // viewer 의 ErdApp 가 jpa3d:invalidate 이벤트를 받아 현재 params 로 refetch.
+        cef.executeJavaScript(
+            "window.dispatchEvent(new CustomEvent('jpa3d:invalidate'))",
+            cef.url ?: ORIGIN,
+            0
+        )
+        log.debug("invalidation pushed to viewer")
+    }
+
     override fun dispose() {
-        // Disposer 체인이 처리
+        // Disposer 체인이 처리. Alarm 도 this 를 parent 로 등록돼 자동 해제.
     }
 
     companion object {
         // 가짜 origin — 실제 네트워크 호출은 발생하지 않지만 페이지 origin 으로 사용된다.
         private const val ORIGIN = "http://jpa3d.local/"
+        // PSI 변경 burst 합치는 debounce 윈도우
+        private const val DEBOUNCE_MS = 500
     }
 }

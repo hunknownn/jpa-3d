@@ -8,6 +8,7 @@ import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiTreeChangeAdapter
 import com.intellij.psi.PsiTreeChangeEvent
 import com.jpa3d.model.GraphData
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -29,6 +30,7 @@ class Jpa3dAnalysisCache(private val project: Project) : Disposable {
     private val log = logger<Jpa3dAnalysisCache>()
     private val analyzer = Jpa3dAnalyzer(project)
     private val dirty = AtomicBoolean(true)
+    private val invalidationListeners = CopyOnWriteArrayList<() -> Unit>()
 
     @Volatile
     private var cached: GraphData? = null
@@ -60,7 +62,29 @@ class Jpa3dAnalysisCache(private val project: Project) : Disposable {
 
     /** 외부에서 강제 무효화. 디버그/테스트 용도. */
     fun invalidate() {
-        dirty.set(true)
+        markDirty()
+    }
+
+    /**
+     * 캐시 무효화 시점에 호출될 콜백 등록. 등록 해제는 [parentDisposable] 가 dispose 될 때 자동.
+     *
+     * 콜백은 PSI write 스레드에서 fire 되므로 무거운 작업은 EDT 로 옮길 것.
+     * 또한 debounce 가 필요하면 호출 측이 책임.
+     */
+    fun addInvalidationListener(parentDisposable: Disposable, listener: () -> Unit) {
+        invalidationListeners.add(listener)
+        com.intellij.openapi.util.Disposer.register(parentDisposable) {
+            invalidationListeners.remove(listener)
+        }
+    }
+
+    private fun markDirty() {
+        // 같은 burst 안에서 여러 번 dirty 호출되면 fire 도 여러 번 → 호출 측 debounce 로 흡수.
+        val wasClean = !dirty.getAndSet(true)
+        if (wasClean) {
+            log.debug("cache marked dirty")
+        }
+        invalidationListeners.forEach { it() }
     }
 
     override fun dispose() {
@@ -86,7 +110,7 @@ class Jpa3dAnalysisCache(private val project: Project) : Disposable {
             val file = event.file ?: return
             val name = file.name
             if (name.endsWith(".java") || name.endsWith(".kt") || name.endsWith(".kts")) {
-                dirty.set(true)
+                markDirty()
             }
         }
     }
