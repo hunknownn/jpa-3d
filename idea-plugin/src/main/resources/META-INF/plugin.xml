@@ -31,6 +31,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.2.1</b>
+        <ul>
+          <li>New plugin icon (DNA double helix).</li>
+          <li>Replaced deprecated <code>ReadAction.compute(ThrowableComputable)</code> usages with Kotlin <code>runReadAction { }</code>.</li>
+        </ul>
         <b>0.2.0</b>
         <ul>
           <li>3D rendering overhauled: entity-card sprites with 3D anchor spheres for real depth perception.</li>

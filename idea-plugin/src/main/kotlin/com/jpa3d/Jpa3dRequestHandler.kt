@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.module.kotlin.KotlinModule
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.runReadAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.DumbService
@@ -176,7 +177,7 @@ class Jpa3dRequestHandler(private val project: Project) {
         if (DumbService.isDumb(project)) return "{\"ok\":false,\"reason\":\"dumb\"}"
 
         // PSI 접근은 read action 안에서. navigate 호출은 EDT 에서.
-        val psiClass = com.intellij.openapi.application.ReadAction.compute<com.intellij.psi.PsiClass?, RuntimeException> {
+        val psiClass = runReadAction {
             JavaPsiFacade.getInstance(project).findClass(fqn, GlobalSearchScope.allScope(project))
         } ?: return "{\"ok\":false,\"reason\":\"not_found\"}"
 
