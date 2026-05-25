@@ -56,6 +56,18 @@ const elk = new ELK();
  * `layered` 알고리즘 + `ORTHOGONAL` 엣지 라우팅으로 직교(꺾인) 경로를 그린다.
  * 방향은 LR/TB 토글. 엣지 교차/겹침은 elkjs 가 dagre 보다 잘 처리한다.
  */
+interface NodeOffset { dx: number; dy: number }
+interface NodeDrag {
+  id: string;
+  startClientX: number;
+  startClientY: number;
+  startDx: number;
+  startDy: number;
+  moved: number;
+}
+
+const CLICK_THRESHOLD_PX = 4;
+
 export default function ErdView2D({ data, width, height, level, onNodeReseed, onNodeNavigate }: Props) {
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -63,7 +75,17 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
   const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [rankdir, setRankdir] = useState<RankDir>("LR");
   const [layout, setLayout] = useState<Layout>(EMPTY_LAYOUT);
+  // 노드별 사용자 조정 offset. 자동 레이아웃 결과 위에 누적된다.
+  const [nodeOffsets, setNodeOffsets] = useState<Map<string, NodeOffset>>(new Map());
+  // 진행 중인 노드 드래그 — render 영향이 없으니 ref 로 잡음
+  const nodeDragRef = useRef<NodeDrag | null>(null);
   const layoutSeq = useRef(0);
+
+  // 레이아웃 방향이 바뀌면(LR↔TB) 좌표계가 회전되니 offset 도 초기화.
+  // 데이터 변경(엔티티 추가/삭제) 만으로는 offset 유지.
+  useEffect(() => {
+    setNodeOffsets(new Map());
+  }, [rankdir]);
 
   const linkKey = useMemo(
     () => (l: GraphLink, i: number) => `${l.source}-${l.target}-${l.relation}-${i}`,
@@ -99,10 +121,44 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
   return (
     <div
       style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#0f172a", cursor: dragging ? "grabbing" : "grab" }}
-      onMouseDown={(e) => setDragging({ x: e.clientX - pan.x, y: e.clientY - pan.y })}
-      onMouseMove={(e) => { if (dragging) setPan({ x: e.clientX - dragging.x, y: e.clientY - dragging.y }); }}
-      onMouseUp={() => setDragging(null)}
-      onMouseLeave={() => setDragging(null)}
+      onMouseDown={(e) => {
+        // 노드 드래그가 stopPropagation 으로 막아주지 않는 빈 캔버스에서만 팬 시작
+        if (nodeDragRef.current) return;
+        setDragging({ x: e.clientX - pan.x, y: e.clientY - pan.y });
+      }}
+      onMouseMove={(e) => {
+        const nd = nodeDragRef.current;
+        if (nd) {
+          const dxC = e.clientX - nd.startClientX;
+          const dyC = e.clientY - nd.startClientY;
+          nd.moved = Math.max(nd.moved, Math.hypot(dxC, dyC));
+          const dx = nd.startDx + dxC / zoom;
+          const dy = nd.startDy + dyC / zoom;
+          setNodeOffsets((prev) => {
+            const next = new Map(prev);
+            next.set(nd.id, { dx, dy });
+            return next;
+          });
+          return;
+        }
+        if (dragging) setPan({ x: e.clientX - dragging.x, y: e.clientY - dragging.y });
+      }}
+      onMouseUp={() => {
+        const nd = nodeDragRef.current;
+        if (nd) {
+          // 거의 안 움직였으면 click 으로 간주 → navigate
+          if (nd.moved < CLICK_THRESHOLD_PX && onNodeNavigate) {
+            const node = data.nodes.find((n) => n.id === nd.id);
+            if (node) onNodeNavigate(node);
+          }
+          nodeDragRef.current = null;
+        }
+        setDragging(null);
+      }}
+      onMouseLeave={() => {
+        nodeDragRef.current = null;
+        setDragging(null);
+      }}
       onWheel={(e) => {
         const next = Math.max(0.2, Math.min(3, zoom * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
         setZoom(next);
@@ -131,8 +187,18 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
             if (!path || path.points.length < 2) return null;
             const color = RELATION_COLOR[l.relation] ?? "#94a3b8";
             const isHover = hoverEdge === key;
-            const d = pointsToPath(path.points);
-            const labelPoint = midPoint(path.points);
+            // 양 끝 노드가 드래그된 경우 첫/끝 점만 offset 적용. 중간 bend points 는 유지.
+            const sOff = nodeOffsets.get(l.source);
+            const tOff = nodeOffsets.get(l.target);
+            const adjustedPoints = (sOff || tOff)
+              ? path.points.map((p, idx) => {
+                  if (idx === 0 && sOff) return { x: p.x + sOff.dx, y: p.y + sOff.dy };
+                  if (idx === path.points.length - 1 && tOff) return { x: p.x + tOff.dx, y: p.y + tOff.dy };
+                  return p;
+                })
+              : path.points;
+            const d = pointsToPath(adjustedPoints);
+            const labelPoint = midPoint(adjustedPoints);
             return (
               <g
                 key={key}
@@ -181,15 +247,26 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
           {data.nodes.map((n) => {
             const box = layout.nodes.get(n.id);
             if (!box) return null;
+            const off = nodeOffsets.get(n.id);
             return (
               <EntityCard
                 key={n.id}
                 node={n}
-                x={box.x}
-                y={box.y}
+                x={box.x + (off?.dx ?? 0)}
+                y={box.y + (off?.dy ?? 0)}
                 level={level}
                 onReseed={() => onNodeReseed(n)}
-                onNavigate={onNodeNavigate ? () => onNodeNavigate(n) : undefined}
+                onDragStart={(clientX, clientY) => {
+                  // outer div 의 mousemove/up 이 받아 처리. navigate 는 mouseup 시 movement 보고 결정.
+                  nodeDragRef.current = {
+                    id: n.id,
+                    startClientX: clientX,
+                    startClientY: clientY,
+                    startDx: off?.dx ?? 0,
+                    startDy: off?.dy ?? 0,
+                    moved: 0
+                  };
+                }}
               />
             );
           })}
@@ -210,6 +287,15 @@ export default function ErdView2D({ data, width, height, level, onNodeReseed, on
         </button>
         <button style={zoomBtnStyle} onClick={() => setZoom((z) => Math.min(3, z * 1.2))}>+</button>
         <button style={zoomBtnStyle} onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
+        {nodeOffsets.size > 0 && (
+          <button
+            style={zoomBtnStyle}
+            title="드래그한 노드 위치를 자동 레이아웃으로 되돌림"
+            onClick={() => setNodeOffsets(new Map())}
+          >
+            위치초기화
+          </button>
+        )}
         <button
           style={zoomBtnStyle}
           onClick={() => {
@@ -370,10 +456,10 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
   };
 }
 
-function EntityCard({ node, x, y, level, onReseed, onNavigate }: {
+function EntityCard({ node, x, y, level, onReseed, onDragStart }: {
   node: GraphNode; x: number; y: number; level: 1 | 2 | 3;
   onReseed: () => void;
-  onNavigate?: () => void;
+  onDragStart: (clientX: number, clientY: number) => void;
 }) {
   const isEntity = node.entity != null;
   const isMappedSuper = node.entity?.kind === "mappedSuperclass";
@@ -390,9 +476,12 @@ function EntityCard({ node, x, y, level, onReseed, onNavigate }: {
   return (
     <g
       transform={`translate(${x},${y})`}
-      onClick={onNavigate}
+      onMouseDown={(e) => {
+        e.stopPropagation();  // 캔버스 팬 방지
+        onDragStart(e.clientX, e.clientY);
+      }}
       onContextMenu={(e) => { e.preventDefault(); onReseed(); }}
-      style={{ cursor: onNavigate ? "pointer" : "default" }}
+      style={{ cursor: "grab" }}
     >
       <rect width={CARD_W} height={h} rx={6} fill="#1e293b" stroke="#334155" />
       <rect width={CARD_W} height={CARD_HEADER_H} rx={6} fill={headerBg} />
