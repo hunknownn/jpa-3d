@@ -8,12 +8,18 @@
         <br/><br/>
         <b>Features</b>
         <ul>
-          <li><b>3D force-directed graph</b> &amp; <b>2D orthogonal ERD</b> (elkjs layered layout)</li>
-          <li>Cardinality detection for <code>@OneToMany</code>, <code>@ManyToOne</code>, <code>@OneToOne</code>, <code>@ManyToMany</code></li>
+          <li><b>3D force-directed graph</b> with entity-card sprites &amp; 3D depth anchors, plus <b>2D orthogonal ERD</b> (elkjs layered layout)</li>
+          <li><b>Crow's foot cardinality markers</b> for <code>@OneToMany</code>, <code>@ManyToOne</code>, <code>@OneToOne</code>, <code>@ManyToMany</code></li>
+          <li><b>@Inheritance strategy badges</b> (<code>SINGLE_TABLE</code> / <code>JOINED</code> / <code>TABLE_PER_CLASS</code>) with <code>@DiscriminatorColumn</code> / <code>@DiscriminatorValue</code></li>
+          <li><b>Multi-level Spring Data Repository inheritance</b> &mdash; follows user-defined intermediate interfaces (<code>MyBaseRepo&lt;T&gt; extends JpaRepository&lt;T,ID&gt;</code>)</li>
+          <li><b>FK columns</b> on entity cards for <code>@ManyToOne</code> / owning <code>@OneToOne</code> with <code>@JoinColumn</code> name resolution</li>
+          <li><b>@Table indexes / uniqueConstraints</b> rendered as column glyphs (◆ unique, # indexed)</li>
           <li>Bidirectional relationship deduplication (drops <code>mappedBy</code> mirror edges)</li>
-          <li>Spring Data Repository → Entity mapping (<code>JpaRepository</code>, <code>CrudRepository</code>, etc.)</li>
-          <li>Column metadata: PK, nullable, unique, length, <code>@GeneratedValue</code> strategy</li>
-          <li><code>@MappedSuperclass</code> / <code>@Embeddable</code> visualization with <code>EXTENDS</code> edges</li>
+          <li>Column metadata: PK, FK, nullable, unique, length, <code>@GeneratedValue</code> strategy, <code>@Column(name)</code></li>
+          <li><b>Search match highlighting</b> &mdash; type to fade non-matching nodes</li>
+          <li><b>Column-hover edge highlight</b> &mdash; hover a column row to spotlight that entity's edges</li>
+          <li><b>Manual layout overrides</b> &mdash; drag nodes in 2D; reset anytime</li>
+          <li><b>Background analysis</b> &mdash; cache pre-warmed after indexing, no EDT blocking</li>
           <li>Java &amp; Kotlin support via UAST &mdash; handles Kotlin's annotation use-site targets transparently</li>
           <li>Both <code>jakarta.persistence</code> and legacy <code>javax.persistence</code> packages</li>
         </ul>
@@ -25,6 +31,19 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.2.0</b>
+        <ul>
+          <li>3D rendering overhauled: entity-card sprites with 3D anchor spheres for real depth perception.</li>
+          <li>2D ERD: crow's foot cardinality markers; manual node drag with position reset.</li>
+          <li>Search match highlighting &mdash; type in the search box to fade non-matching nodes and edges.</li>
+          <li>Column hover spotlights connected edges of that entity.</li>
+          <li><code>@Inheritance</code> strategy badge (<code>SINGLE_TABLE</code> / <code>JOINED</code> / <code>TABLE_PER_CLASS</code>) with discriminator info.</li>
+          <li>FK columns shown on entity cards for <code>@ManyToOne</code> / owning <code>@OneToOne</code>, including <code>@JoinColumn(name)</code> resolution.</li>
+          <li><code>@Table</code> indexes / uniqueConstraints rendered as column glyphs.</li>
+          <li>Multi-level Spring Data repository inheritance is now followed through user-defined intermediate interfaces.</li>
+          <li>Edge labels include the FK column name when available.</li>
+          <li>Background cache warming &mdash; analysis runs in a pooled thread after indexing finishes; viewer auto-retries while the IDE is still indexing.</li>
+        </ul>
         <b>0.1.0</b>
         <ul>
           <li>Initial release.</li>
