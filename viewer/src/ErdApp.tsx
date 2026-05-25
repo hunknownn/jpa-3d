@@ -65,13 +65,6 @@ export default function ErdApp() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  // plugin 측에서 PSI 변경 시 jpa3d:invalidate 이벤트를 보낸다 → tick 증가시켜 fetch 재실행
-  useEffect(() => {
-    const onInvalidate = () => setRefreshTick((t) => t + 1);
-    window.addEventListener("jpa3d:invalidate", onInvalidate);
-    return () => window.removeEventListener("jpa3d:invalidate", onInvalidate);
-  }, []);
-
   // URL ↔ state 동기화
   useEffect(() => {
     writeParamsToHash(params);
@@ -177,8 +170,22 @@ export default function ErdApp() {
           </div>
         )}
         <div style={{ flex: 1 }} />
-        <div style={{ color: "#94a3b8", fontSize: 12 }}>
-          {loading ? "로딩 중..." : `노드 ${data.nodes.length} · 관계 ${data.links.length}`}
+        <button
+          onClick={() => setRefreshTick((t) => t + 1)}
+          disabled={loading}
+          title="현재 프로젝트 상태로 ERD 재분석"
+          style={{
+            padding: "4px 10px", fontSize: 12,
+            background: loading ? "#334155" : "transparent",
+            color: loading ? "#64748b" : "#cbd5e1",
+            border: "1px solid #475569", borderRadius: 4,
+            cursor: loading ? "wait" : "pointer"
+          }}
+        >
+          {loading ? "동기화 중..." : "↻ 동기화"}
+        </button>
+        <div style={{ color: "#94a3b8", fontSize: 12, marginLeft: 12 }}>
+          {`노드 ${data.nodes.length} · 관계 ${data.links.length}`}
         </div>
       </div>
 
