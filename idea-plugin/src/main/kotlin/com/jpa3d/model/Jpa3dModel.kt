@@ -38,10 +38,22 @@ data class ColumnInfo(
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
+data class InheritanceInfo(
+    /** "SINGLE_TABLE" / "JOINED" / "TABLE_PER_CLASS" (JPA 기본은 SINGLE_TABLE). */
+    val strategy: String,
+    /** @DiscriminatorColumn(name=...) — 명시되지 않았으면 null. */
+    val discriminatorColumn: String?,
+    /** @DiscriminatorValue("...") — 자식 entity 에서 자신을 어떻게 식별하는지. */
+    val discriminatorValue: String?
+)
+
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class EntityInfo(
     val kind: String,      // EntityKind.jsonValue ("entity" / "mappedSuperclass" / "embeddable")
     val tableName: String?,
-    val columns: List<ColumnInfo>
+    val columns: List<ColumnInfo>,
+    /** @Inheritance 가 붙은 상속 베이스 또는 그 자식. 아니면 null. */
+    val inheritance: InheritanceInfo? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

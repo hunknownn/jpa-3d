@@ -72,7 +72,20 @@ const RELATION_COLOR: Partial<Record<Relation, string>> = {
 
 const CARD_W = 260;
 const CARD_HEADER_H = 32;
+const INH_BAR_H = 18;
 const ROW_H = 20;
+
+const INHERITANCE_COLOR: Record<string, string> = {
+  SINGLE_TABLE: "#92400e",   // amber-800
+  JOINED: "#6d28d9",         // violet-700
+  TABLE_PER_CLASS: "#0e7490" // cyan-700
+};
+
+const INHERITANCE_LABEL: Record<string, string> = {
+  SINGLE_TABLE: "SINGLE",
+  JOINED: "JOINED",
+  TABLE_PER_CLASS: "TPC"
+};
 
 type RankDir = "LR" | "TB";
 
@@ -464,8 +477,9 @@ function midPoint(points: { x: number; y: number }[]): { x: number; y: number } 
 }
 
 function cardHeight(n: GraphNode, level: 1 | 2 | 3): number {
-  if (level < 2 || !n.entity || n.entity.columns.length === 0) return CARD_HEADER_H + 8;
-  return CARD_HEADER_H + n.entity.columns.length * ROW_H + 8;
+  const inhExtra = n.entity?.inheritance ? INH_BAR_H : 0;
+  if (level < 2 || !n.entity || n.entity.columns.length === 0) return CARD_HEADER_H + inhExtra + 8;
+  return CARD_HEADER_H + inhExtra + n.entity.columns.length * ROW_H + 8;
 }
 
 /**
@@ -584,6 +598,11 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
   const tableName = node.entity?.tableName;
   const showTableBadge = isEntity && tableName != null && tableName.toLowerCase() !== node.name.toLowerCase();
 
+  const inh = node.entity?.inheritance;
+  const inhColor = inh ? (INHERITANCE_COLOR[inh.strategy] ?? "#475569") : null;
+  const inhLabel = inh ? (INHERITANCE_LABEL[inh.strategy] ?? inh.strategy) : null;
+  const columnsY = CARD_HEADER_H + (inh ? INH_BAR_H : 0);
+
   return (
     <g
       transform={`translate(${x},${y})`}
@@ -608,10 +627,27 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
           {tableName}
         </text>
       )}
+      {inh && inhColor && inhLabel && (
+        <g transform={`translate(0,${CARD_HEADER_H})`}>
+          <rect width={CARD_W} height={INH_BAR_H} fill={inhColor} opacity={0.85} />
+          <text x={8} y={13} fill="#fff" fontSize={10} fontWeight={600} letterSpacing={0.4}>
+            {inhLabel}
+            {inh.discriminatorColumn ? `  ·  ${inh.discriminatorColumn}` : ""}
+          </text>
+          {inh.discriminatorValue && (
+            <text
+              x={CARD_W - 8} y={13}
+              fill="#fff" fontSize={10} textAnchor="end" fontStyle="italic" opacity={0.95}
+            >
+              = "{inh.discriminatorValue}"
+            </text>
+          )}
+        </g>
+      )}
       {showColumns && node.entity!.columns.map((c, i) => (
         <g
           key={c.fieldName}
-          transform={`translate(0,${CARD_HEADER_H + i * ROW_H})`}
+          transform={`translate(0,${columnsY + i * ROW_H})`}
           onMouseEnter={() => onColumnHover?.(true)}
           onMouseLeave={() => onColumnHover?.(false)}
         >

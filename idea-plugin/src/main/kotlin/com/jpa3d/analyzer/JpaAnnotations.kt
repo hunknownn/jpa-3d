@@ -13,6 +13,9 @@ object JpaAnnotations {
     val MAPPED_SUPERCLASS = setOf("jakarta.persistence.MappedSuperclass", "javax.persistence.MappedSuperclass")
     val EMBEDDABLE = setOf("jakarta.persistence.Embeddable", "javax.persistence.Embeddable")
     val TABLE = setOf("jakarta.persistence.Table", "javax.persistence.Table")
+    val INHERITANCE = setOf("jakarta.persistence.Inheritance", "javax.persistence.Inheritance")
+    val DISCRIMINATOR_COLUMN = setOf("jakarta.persistence.DiscriminatorColumn", "javax.persistence.DiscriminatorColumn")
+    val DISCRIMINATOR_VALUE = setOf("jakarta.persistence.DiscriminatorValue", "javax.persistence.DiscriminatorValue")
 
     // 필드 레벨
     val ID = setOf("jakarta.persistence.Id", "javax.persistence.Id")

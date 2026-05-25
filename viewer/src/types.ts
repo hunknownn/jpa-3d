@@ -14,10 +14,20 @@ export interface ColumnInfo {
   generatedValue?: string | null;
 }
 
+export interface InheritanceInfo {
+  /** "SINGLE_TABLE" | "JOINED" | "TABLE_PER_CLASS" */
+  strategy: string;
+  /** @DiscriminatorColumn(name=...) — 베이스에 정의됨. */
+  discriminatorColumn?: string | null;
+  /** @DiscriminatorValue("...") — 자식 entity 의 식별 값. */
+  discriminatorValue?: string | null;
+}
+
 export interface EntityInfo {
   kind: "entity" | "mappedSuperclass" | "embeddable";
   tableName?: string | null;
   columns: ColumnInfo[];
+  inheritance?: InheritanceInfo | null;
 }
 
 export interface GraphNode {

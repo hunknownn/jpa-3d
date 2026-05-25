@@ -20,6 +20,7 @@ import com.jpa3d.model.EntityKind
 import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphLink
 import com.jpa3d.model.GraphNode
+import com.jpa3d.model.InheritanceInfo
 import com.jpa3d.model.Relation
 import org.jetbrains.uast.UAnnotation
 import org.jetbrains.uast.UClass
@@ -317,9 +318,59 @@ class Jpa3dAnalyzer(private val project: Project) {
             entity = EntityInfo(
                 kind = rec.kind.jsonValue,
                 tableName = tableName,
-                columns = columns
+                columns = columns,
+                inheritance = extractInheritance(u)
             )
         )
+    }
+
+    /**
+     * @Inheritance 정보 추출.
+     *
+     * JPA 규칙:
+     *  - @Inheritance 는 베이스 entity 에만 붙는다. 자식 entity 는 부모로부터 strategy 를 물려받는다.
+     *  - @DiscriminatorColumn 도 베이스에만 (SINGLE_TABLE/JOINED).
+     *  - @DiscriminatorValue 는 자식 entity 마다.
+     *
+     * 그러므로:
+     *  - 클래스 본인에 @Inheritance 가 있으면 베이스. strategy + discriminatorColumn 채움.
+     *  - 자식이면 슈퍼클래스를 따라 올라가며 @Inheritance 를 찾아 strategy 만 상속,
+     *    discriminatorColumn 은 부모의 것을 그대로 넘기고, discriminatorValue 는 자기 것.
+     *  - 둘 다 못 찾으면 null.
+     */
+    private fun extractInheritance(u: UClass): InheritanceInfo? {
+        val self = u.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.INHERITANCE }
+        val ownDisc = u.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.DISCRIMINATOR_COLUMN }
+            ?.stringAttr("name")
+        val discValue = u.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.DISCRIMINATOR_VALUE }
+            ?.stringAttr("value")
+
+        if (self != null) {
+            // 명시되지 않으면 JPA 기본 SINGLE_TABLE
+            val strategy = self.findAttributeValue("strategy")?.let { extractEnumName(it) } ?: "SINGLE_TABLE"
+            return InheritanceInfo(strategy, ownDisc, discValue)
+        }
+
+        // 부모에서 @Inheritance 상속받는지 확인
+        var sc: PsiClass? = u.javaPsi.superClass
+        val visited = mutableSetOf<String>()
+        while (sc != null) {
+            val q = sc.qualifiedName ?: break
+            if (!visited.add(q)) break
+            if (q == "java.lang.Object") break
+            val parentU = sc.toUElementOfType<UClass>()
+            val parentInh = parentU?.uAnnotations?.firstOrNull { it.qualifiedName in JpaAnnotations.INHERITANCE }
+            if (parentInh != null) {
+                val strategy = parentInh.findAttributeValue("strategy")?.let { extractEnumName(it) } ?: "SINGLE_TABLE"
+                val parentDisc = parentU.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.DISCRIMINATOR_COLUMN }
+                    ?.stringAttr("name")
+                return InheritanceInfo(strategy, parentDisc, discValue)
+            }
+            sc = sc.superClass
+        }
+
+        // @Inheritance 가 없어도 @DiscriminatorValue 만 있을 수 있으나 (단독으로는 의미 없음) 무시.
+        return null
     }
 
     private fun toRepositoryNode(rec: RepositoryRecord): GraphNode {
