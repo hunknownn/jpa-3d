@@ -3,12 +3,14 @@ package com.jpa3d.analyzer
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
+import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiModifier
 import com.intellij.psi.search.GlobalSearchScope
-import com.intellij.psi.search.searches.AllClassesSearch
+import com.intellij.psi.search.searches.AnnotatedElementsSearch
+import com.intellij.psi.search.searches.DirectClassInheritorsSearch
 import com.jpa3d.model.ColumnInfo
 import com.jpa3d.model.EntityInfo
 import com.jpa3d.model.EntityKind
@@ -28,15 +30,12 @@ import org.jetbrains.uast.toUElementOfType
 /**
  * 프로젝트를 훑어 JPA Entity / Repository 그래프를 만든다.
  *
- * UAST 기반 — Java/Kotlin 양쪽의 어노테이션 사이트 타깃 차이를 통합 추상화해
- * Kotlin 의 `@field:`, property/getter/setter 어노테이션 모두 한 곳에서 본다.
+ * 인덱스 기반 — `AllClassesSearch` 처럼 전체 클래스를 PSI 로 로드하지 않고,
+ * 어노테이션/상속 인덱스로 후보를 직접 조회한다.
+ *  - Entity 류: [AnnotatedElementsSearch] 로 `@Entity` / `@MappedSuperclass` / `@Embeddable`
+ *  - Repository: 각 Spring Data 마커에 대해 [DirectClassInheritorsSearch]
  *
- * 동작:
- * 1. 프로젝트 production 스코프의 모든 `PsiClass` → `UClass` 로 변환
- * 2. 클래스 어노테이션에서 `@Entity` / `@MappedSuperclass` / `@Embeddable` 식별
- * 3. 각 Entity 의 `UField` 를 컬럼/관계로 분류 — Kotlin property 어노테이션도 통합 조회
- * 4. Spring Data Repository (직접 상속) → 첫 generic 인자 (Entity) 매핑
- * 5. 양방향 mappedBy 측 엣지는 라벨에 `mappedBy=` 를 남기고 본 분석기 내에서 제거
+ * UAST 기반 — Java/Kotlin 의 어노테이션 사이트 타깃 차이를 통합 추상화.
  *
  * 모든 PSI/UAST 접근은 read action 안에서.
  */
@@ -46,25 +45,27 @@ class Jpa3dAnalyzer(private val project: Project) {
 
     fun analyze(): GraphData = ReadAction.compute<GraphData, RuntimeException> {
         val scope = GlobalSearchScope.projectScope(project)
-        val classes = mutableListOf<UClass>()
-        AllClassesSearch.search(scope, project).forEach { c: PsiClass ->
-            c.toUElementOfType<UClass>()?.let(classes::add)
-            true
-        }
+        val facade = JavaPsiFacade.getInstance(project)
+        // 어노테이션 PsiClass 를 찾을 때는 라이브러리 jar 도 포함해야 함 (jakarta.persistence.* 가 거기 있음).
+        val classpathScope = GlobalSearchScope.allScope(project)
 
         val entityClasses = mutableMapOf<String, EntityRecord>()
         val repositoryClasses = mutableMapOf<String, RepositoryRecord>()
 
-        for (c in classes) {
-            val fqn = c.qualifiedName ?: continue
-            val kind = entityKindOf(c)
-            if (kind != null) {
-                entityClasses[fqn] = EntityRecord(c, kind)
-                continue
-            }
-            val targetEntity = repositoryTargetEntity(c)
-            if (targetEntity != null) {
-                repositoryClasses[fqn] = RepositoryRecord(c, targetEntity)
+        // === Entity 후보 수집 ===
+        scanAnnotated(JpaAnnotations.ENTITY, facade, classpathScope, scope, EntityKind.ENTITY, entityClasses)
+        scanAnnotated(JpaAnnotations.MAPPED_SUPERCLASS, facade, classpathScope, scope, EntityKind.MAPPED_SUPERCLASS, entityClasses)
+        scanAnnotated(JpaAnnotations.EMBEDDABLE, facade, classpathScope, scope, EntityKind.EMBEDDABLE, entityClasses)
+
+        // === Repository 후보 수집 ===
+        for (markerFqn in SpringDataRepositories.MARKERS) {
+            val marker = facade.findClass(markerFqn, classpathScope) ?: continue
+            DirectClassInheritorsSearch.search(marker, scope).forEach { psi ->
+                val uClass = psi.toUElementOfType<UClass>() ?: return@forEach
+                val fqn = uClass.qualifiedName ?: return@forEach
+                if (entityClasses.containsKey(fqn) || repositoryClasses.containsKey(fqn)) return@forEach
+                val target = repositoryTargetEntity(uClass) ?: return@forEach
+                repositoryClasses[fqn] = RepositoryRecord(uClass, target)
             }
         }
 
@@ -95,16 +96,30 @@ class Jpa3dAnalyzer(private val project: Project) {
         GraphData(seed = "", depth = 0, nodes = nodes, links = links)
     }
 
-    // === 어노테이션 식별 ===
-
-    private fun entityKindOf(c: UClass): EntityKind? {
-        for (ann in c.uAnnotations) {
-            val q = ann.qualifiedName ?: continue
-            if (q in JpaAnnotations.ENTITY) return EntityKind.ENTITY
-            if (q in JpaAnnotations.MAPPED_SUPERCLASS) return EntityKind.MAPPED_SUPERCLASS
-            if (q in JpaAnnotations.EMBEDDABLE) return EntityKind.EMBEDDABLE
+    /**
+     * 주어진 어노테이션 FQN 집합(jakarta + javax) 으로 어노테이션된 클래스를 인덱스에서
+     * 직접 조회해 [out] 에 채운다.
+     *
+     * - 어노테이션 PsiClass 가 classpath 에 없으면 (의존성 미포함) 그냥 스킵.
+     * - 같은 클래스가 jakarta 와 javax 양쪽에 잡힐 일은 거의 없지만 중복 방지를 위해
+     *   먼저 본 entryKind 가 우선.
+     */
+    private fun scanAnnotated(
+        annotationFqns: Set<String>,
+        facade: JavaPsiFacade,
+        classpathScope: GlobalSearchScope,
+        searchScope: GlobalSearchScope,
+        kind: EntityKind,
+        out: MutableMap<String, EntityRecord>
+    ) {
+        for (annFqn in annotationFqns) {
+            val annClass = facade.findClass(annFqn, classpathScope) ?: continue
+            AnnotatedElementsSearch.searchPsiClasses(annClass, searchScope).forEach { psi ->
+                val uClass = psi.toUElementOfType<UClass>() ?: return@forEach
+                val fqn = uClass.qualifiedName ?: return@forEach
+                out.putIfAbsent(fqn, EntityRecord(uClass, kind))
+            }
         }
-        return null
     }
 
     /**
