@@ -1,13 +1,17 @@
 package com.jpa3d
 
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import javax.swing.JComponent
 import javax.swing.JLabel
 import javax.swing.SwingConstants
@@ -53,6 +57,21 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
                 browser.loadHTML(missingResourceHtml())
             }
             component = browser.component
+
+            // === 캐시 워밍 ===
+            // pooled thread 에서 인덱싱이 끝나길 기다린 뒤 한 번 분석을 돌려 캐시를 채워둔다.
+            // 이렇게 하면 사용자가 동기화 버튼을 누를 때 (혹은 viewer 가 첫 fetchErd 를 보낼 때)
+            // 캐시 히트라 즉시 응답 가능. JCEF 콜백 스레드에서 무거운 분석을 동기 수행하던
+            // 부담이 사라져 IDE 메인 작업 영향을 최소화.
+            ApplicationManager.getApplication().executeOnPooledThread {
+                try {
+                    DumbService.getInstance(project).waitForSmartMode()
+                    project.service<Jpa3dAnalysisCache>().getGraphData()
+                    log.info("cache pre-warmed")
+                } catch (e: Exception) {
+                    log.warn("pre-warm failed: ${e.message}")
+                }
+            }
         }
     }
 

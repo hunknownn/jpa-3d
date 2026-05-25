@@ -66,8 +66,8 @@ class Jpa3dRequestHandler(private val project: Project) {
      */
     private fun handleErd(args: Map<String, Any?>?): String {
         if (DumbService.isDumb(project)) {
-            log.info("dumb mode — returning empty graph")
-            return EMPTY_ERD_JSON
+            log.info("dumb mode — returning indexing placeholder")
+            return INDEXING_ERD_JSON
         }
         val scope = (args?.get("scope") as? String) ?: "all"
         val seed = args?.get("seed") as? String
@@ -196,5 +196,7 @@ class Jpa3dRequestHandler(private val project: Project) {
 
     companion object {
         private const val EMPTY_ERD_JSON = """{"seed":"","depth":0,"nodes":[],"links":[]}"""
+        // dumb mode: viewer 가 "분석 중" 표시 + 자동 retry 하도록 indexing 플래그
+        private const val INDEXING_ERD_JSON = """{"seed":"","depth":0,"nodes":[],"links":[],"indexing":true}"""
     }
 }

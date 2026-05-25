@@ -108,7 +108,15 @@ export default function ErdApp() {
   }, [query]);
 
   const hasEntities = data.nodes.some((n) => n.entity != null);
-  const showEmpty = !loading && !error && params.scope === "all" && !hasEntities;
+  const isIndexing = !!data.indexing;
+  const showEmpty = !loading && !error && !isIndexing && params.scope === "all" && !hasEntities;
+
+  // indexing 상태면 3초마다 자동 재요청 — 인덱싱 끝나면 첫 성공 응답에서 멈춤
+  useEffect(() => {
+    if (!isIndexing) return;
+    const t = setTimeout(() => setRefreshTick((x) => x + 1), 3000);
+    return () => clearTimeout(t);
+  }, [isIndexing, refreshTick]);
 
   // 검색어가 있고, 매칭이 1개 이상일 때만 하이라이트 활성.
   // 비활성 시 undefined 를 넘겨 뷰가 평소처럼 렌더하게 한다.
@@ -214,7 +222,9 @@ export default function ErdApp() {
 
       {/* 그래프 영역 */}
       <div style={{ position: "absolute", top: 48, left: 0, right: 0, bottom: 0 }}>
-        {showEmpty ? (
+        {isIndexing ? (
+          <IndexingState />
+        ) : showEmpty ? (
           <EmptyState />
         ) : error ? (
           <div style={{ padding: 24, color: "#f87171" }}>{error}</div>
@@ -311,6 +321,20 @@ function EmptyState() {
       <div style={{ fontSize: 18 }}>이 프로젝트에서 JPA Entity를 찾지 못했습니다.</div>
       <div style={{ fontSize: 13 }}>
         분석 대상이 빌드되어 있고 패키지 범위 설정이 올바른지 확인해 주세요.
+      </div>
+    </div>
+  );
+}
+
+function IndexingState() {
+  return (
+    <div style={{
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      height: "100%", color: "#94a3b8", gap: 8
+    }}>
+      <div style={{ fontSize: 18 }}>IDE 인덱싱 진행 중…</div>
+      <div style={{ fontSize: 13 }}>
+        인덱싱이 끝나면 자동으로 분석 결과가 표시됩니다.
       </div>
     </div>
   );

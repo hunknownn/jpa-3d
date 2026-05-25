@@ -82,5 +82,7 @@ data class GraphData(
     val seed: String,
     val depth: Int,
     val nodes: List<GraphNode>,
-    val links: List<GraphLink>
+    val links: List<GraphLink>,
+    /** IDE 가 dumb mode (인덱싱 진행 중) 라 분석을 미룬 상태. viewer 는 자동 retry. */
+    val indexing: Boolean = false
 )

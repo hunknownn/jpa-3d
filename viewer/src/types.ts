@@ -54,4 +54,6 @@ export interface GraphData {
   depth: number;
   nodes: GraphNode[];
   links: GraphLink[];
+  /** IDE 인덱싱 진행 중이라 분석이 보류됐음. viewer 는 자동 재시도. */
+  indexing?: boolean;
 }
