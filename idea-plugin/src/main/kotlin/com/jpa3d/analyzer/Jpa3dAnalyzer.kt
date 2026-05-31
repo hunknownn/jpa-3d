@@ -253,7 +253,8 @@ class Jpa3dAnalyzer(private val project: Project) {
         if (!owningRelation) return null
 
         val joinCol = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_COLUMN }
-        val explicitName = joinCol?.stringAttr("name")
+        // @JoinColumn(name="") (name 미지정) 도 빈 문자열 → null 정규화 후 JPA 기본 `필드명_id`.
+        val explicitName = joinCol?.stringAttr("name")?.takeIf { it.isNotBlank() }
         val fkName = explicitName ?: "${f.name}_id"
         val nullable = joinCol?.boolAttr("nullable") ?: true
         val unique = joinCol?.boolAttr("unique") ?: (qn in JpaAnnotations.ONE_TO_ONE)
@@ -382,7 +383,8 @@ class Jpa3dAnalyzer(private val project: Project) {
         val columnAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.COLUMN }
         val generatedAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.GENERATED_VALUE }
 
-        val columnName = columnAnn?.stringAttr("name")
+        // @Column(name="") (name 미지정) 은 빈 문자열로 들어오므로 null 로 정규화 — JPA 규약상 필드명 사용.
+        val columnName = columnAnn?.stringAttr("name")?.takeIf { it.isNotBlank() }
         val nullable = columnAnn?.boolAttr("nullable") ?: true
         val columnUnique = columnAnn?.boolAttr("unique") ?: false
         val length = columnAnn?.intAttr("length")

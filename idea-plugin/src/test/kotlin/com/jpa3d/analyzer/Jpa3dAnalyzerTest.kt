@@ -117,6 +117,26 @@ class Jpa3dAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         assertEquals(4, price.scale)
     }
 
+    fun testColumnWithoutNameFallsBackToFieldName() {
+        // @Column 에 name 미지정 — stub 기본값이 "" 라 빈 문자열로 들어옴.
+        // analyzer 가 빈 문자열을 필드명으로 정규화하지 않으면 columnName="" 로 떨어져
+        // DDL 에서 ` VARCHAR(255)` 같은 이름 없는 컬럼이 생성됨 (통합 골든 테스트에서 발견된 회귀).
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Article {
+                @Id Long id;
+                @Column(nullable = false) String title;
+            }
+            """.trimIndent()
+        )
+        val title = analyze().entity("com.example.Article").entity!!.columns.first { it.fieldName == "title" }
+        assertEquals("title", title.columnName)
+        assertFalse(title.nullable)
+    }
+
     fun testTransientFieldSkipped() {
         myFixture.addClass(
             """
