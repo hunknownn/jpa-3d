@@ -219,6 +219,41 @@ class ExportPipelineGoldenTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     // ===================================================================================
+    // self-referencing @ManyToMany — 커스텀 @JoinColumn 으로 컬럼명 충돌 회피
+    // ===================================================================================
+
+    fun testSelfReferencingManyToManyUsesCustomJoinColumns() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Member {
+                @Id Long id;
+                @ManyToMany
+                @JoinTable(name = "friendship",
+                    joinColumns = @JoinColumn(name = "member_id"),
+                    inverseJoinColumns = @JoinColumn(name = "friend_id"))
+                java.util.List<Member> friends;
+            }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        assertContains(sql, "CREATE TABLE friendship")
+        val block = sql.substringAfter("CREATE TABLE friendship").substringBefore(");")
+        // 두 FK 컬럼이 서로 다른 이름이어야 (기본 규칙이면 둘 다 member_id 로 충돌)
+        assertTrue("member_id 누락:\n$block", Regex("member_id\\s+BIGINT").containsMatchIn(block))
+        assertTrue("friend_id 누락:\n$block", Regex("friend_id\\s+BIGINT").containsMatchIn(block))
+        assertTrue("복합 PK 가 두 다른 컬럼이어야:\n$block",
+            block.contains("PRIMARY KEY (member_id, friend_id)"))
+        // 양쪽 FK 모두 member 를 참조
+        assertTrue("member_id FK 누락:\n$sql",
+            Regex("FOREIGN KEY \\(member_id\\) REFERENCES member \\(id\\)").containsMatchIn(sql))
+        assertTrue("friend_id FK 누락:\n$sql",
+            Regex("FOREIGN KEY \\(friend_id\\) REFERENCES member \\(id\\)").containsMatchIn(sql))
+    }
+
+    // ===================================================================================
     // @SequenceGenerator — CREATE SEQUENCE (Postgres)
     // ===================================================================================
 

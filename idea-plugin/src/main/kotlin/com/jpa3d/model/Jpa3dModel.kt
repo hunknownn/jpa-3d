@@ -114,7 +114,11 @@ data class GraphLink(
      */
     val manyToManyOwning: Boolean = false,
     /** owning @ManyToMany 의 `@JoinTable(name=...)`. 미지정이면 null → DDL 에서 기본 규칙으로 생성. */
-    val joinTableName: String? = null
+    val joinTableName: String? = null,
+    /** `@JoinTable(joinColumns=@JoinColumn(name=...))` — owner 측 FK 컬럼명. 미지정이면 null. */
+    val joinColumnName: String? = null,
+    /** `@JoinTable(inverseJoinColumns=@JoinColumn(name=...))` — target 측 FK 컬럼명. self-ref M:N 에 필수. */
+    val inverseJoinColumnName: String? = null
 )
 
 data class GraphData(

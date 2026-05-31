@@ -84,7 +84,13 @@ internal object JpaStubs {
                 " String referencedColumnName() default \"\";" +
                 " }"
         )
-        fixture.addClass("package jakarta.persistence; public @interface JoinTable { String name() default \"\"; }")
+        fixture.addClass(
+            "package jakarta.persistence; public @interface JoinTable {" +
+                " String name() default \"\";" +
+                " JoinColumn[] joinColumns() default {};" +
+                " JoinColumn[] inverseJoinColumns() default {};" +
+                " }"
+        )
         fixture.addClass("package jakarta.persistence; public @interface Lob { }")
         fixture.addClass(
             "package jakarta.persistence; public @interface SequenceGenerator {" +

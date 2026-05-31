@@ -476,11 +476,12 @@ class DdlExporter(
         val targetPkCol = targetPk?.columnName ?: "id"
         return JoinTableSpec(
             name = r.joinTableName ?: "${tableNameOf(owner)}_${tableNameOf(target)}",
-            joinColumn = "${owner.name}_$ownerPkCol",
+            // 커스텀 @JoinColumn 우선 — self-ref M:N(owner=target)은 기본 규칙이 같은 이름이라 커스텀 필수.
+            joinColumn = r.joinColumnName ?: "${owner.name}_$ownerPkCol",
             joinColType = ownerPk?.let { sqlType(it) } ?: bigint(),
             ownerTable = tableNameOf(owner),
             ownerPkCol = ownerPkCol,
-            inverseColumn = "${target.name}_$targetPkCol",
+            inverseColumn = r.inverseJoinColumnName ?: "${target.name}_$targetPkCol",
             inverseColType = targetPk?.let { sqlType(it) } ?: bigint(),
             targetTable = tableNameOf(target),
             targetPkCol = targetPkCol

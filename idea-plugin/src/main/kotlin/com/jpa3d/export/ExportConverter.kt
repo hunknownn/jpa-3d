@@ -128,6 +128,8 @@ object ExportConverter {
         type = link.relation.name,
         label = link.label,
         manyToManyOwning = link.manyToManyOwning,
-        joinTableName = link.joinTableName
+        joinTableName = link.joinTableName,
+        joinColumnName = link.joinColumnName,
+        inverseJoinColumnName = link.inverseJoinColumnName
     )
 }

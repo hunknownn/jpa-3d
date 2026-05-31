@@ -507,12 +507,27 @@ class Jpa3dAnalyzer(private val project: Project) {
 
         // MANY_TO_MANY owning side(mappedBy 없음)에서만 조인 테이블 메타를 실어 DDL 이 한 번만 생성.
         val owningManyToMany = relation == Relation.MANY_TO_MANY && mappedBy.isNullOrBlank()
-        val joinTableName = if (owningManyToMany) {
+        val joinTableAnn = if (owningManyToMany) {
             f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_TABLE }
-                ?.stringAttr("name")?.takeIf { it.isNotBlank() }
         } else null
+        val joinTableName = joinTableAnn?.stringAttr("name")?.takeIf { it.isNotBlank() }
+        val joinColumnName = firstJoinColumnName(joinTableAnn, "joinColumns")
+        val inverseJoinColumnName = firstJoinColumnName(joinTableAnn, "inverseJoinColumns")
 
-        return GraphLink(owner, target, relation, 1, label, owningManyToMany, joinTableName)
+        return GraphLink(
+            owner, target, relation, 1, label,
+            owningManyToMany, joinTableName, joinColumnName, inverseJoinColumnName
+        )
+    }
+
+    /** `@JoinTable` 의 joinColumns / inverseJoinColumns 배열에서 첫 `@JoinColumn(name=...)` 을 추출. */
+    private fun firstJoinColumnName(joinTableAnn: UAnnotation?, attr: String): String? {
+        val psi = joinTableAnn?.javaPsi as? PsiAnnotation ?: return null
+        var name: String? = null
+        forEachNestedAnnotation(psi.findAttributeValue(attr)) { jc ->
+            if (name == null) name = (jc.findAttributeValue("name") as? PsiLiteralExpression)?.value as? String
+        }
+        return name?.takeIf { it.isNotBlank() }
     }
 
     private fun relationTargetFqn(f: UField, relAnn: UAnnotation, known: Set<String>): String? {

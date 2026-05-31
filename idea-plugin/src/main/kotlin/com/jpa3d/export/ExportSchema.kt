@@ -79,7 +79,11 @@ data class ExportRelation(
     /** MANY_TO_MANY owning side 여부 — DDL 조인 테이블 생성 트리거. */
     val manyToManyOwning: Boolean = false,
     /** owning @ManyToMany 의 `@JoinTable(name=...)`. 미지정이면 null. */
-    val joinTableName: String? = null
+    val joinTableName: String? = null,
+    /** `@JoinTable(joinColumns=@JoinColumn(name=...))` — owner 측 FK 컬럼명. */
+    val joinColumnName: String? = null,
+    /** `@JoinTable(inverseJoinColumns=@JoinColumn(name=...))` — target 측 FK 컬럼명. */
+    val inverseJoinColumnName: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
