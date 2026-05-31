@@ -172,6 +172,53 @@ class ExportPipelineGoldenTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     // ===================================================================================
+    // @ManyToMany — 조인 테이블 생성 (양방향이어도 owning 한쪽만)
+    // ===================================================================================
+
+    fun testManyToManyGeneratesJoinTableOnce() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Course {
+                @Id Long id;
+                @ManyToMany(mappedBy = "courses") java.util.List<Student> students;
+            }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Student {
+                @Id Long id;
+                @ManyToMany
+                @JoinTable(name = "student_course")
+                java.util.List<Course> courses;
+            }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        // 조인 테이블이 정확히 한 번만 생성 (양방향 중복 방지)
+        assertEquals("조인 테이블이 1회만 생성돼야:\n$sql",
+            2, sql.split("CREATE TABLE student_course").size)
+        val block = sql.substringAfter("CREATE TABLE student_course").substringBefore(");")
+        assertTrue("student_id BIGINT 누락:\n$block", Regex("student_id\\s+BIGINT").containsMatchIn(block))
+        assertTrue("course_id BIGINT 누락:\n$block", Regex("course_id\\s+BIGINT").containsMatchIn(block))
+        assertTrue("복합 PK 누락:\n$block", block.contains("PRIMARY KEY (student_id, course_id)"))
+        // 양쪽 FK
+        assertTrue("student FK 누락:\n$sql",
+            Regex("ALTER TABLE student_course .*FOREIGN KEY \\(student_id\\) REFERENCES student \\(id\\)").containsMatchIn(sql))
+        assertTrue("course FK 누락:\n$sql",
+            Regex("ALTER TABLE student_course .*FOREIGN KEY \\(course_id\\) REFERENCES course \\(id\\)").containsMatchIn(sql))
+        // M:N 은 호스트 엔티티에 FK 컬럼을 만들지 않음 — Student 테이블엔 courses 컬럼 없음
+        val studentBlock = sql.substringAfter("CREATE TABLE student (").substringBefore(");")
+        assertFalse("M:N 이 호스트 컬럼 생성:\n$studentBlock", studentBlock.contains("courses"))
+    }
+
+    // ===================================================================================
     // @SequenceGenerator — CREATE SEQUENCE (Postgres)
     // ===================================================================================
 

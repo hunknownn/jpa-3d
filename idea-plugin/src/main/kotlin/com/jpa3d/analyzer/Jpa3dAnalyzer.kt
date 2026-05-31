@@ -51,6 +51,14 @@ class Jpa3dAnalyzer(private val project: Project) {
 
     private val log = logger<Jpa3dAnalyzer>()
 
+    private companion object {
+        /** resolve 실패 시 컬렉션 판정용 raw simple name (java.util 기준). */
+        val COLLECTION_SIMPLE_NAMES = setOf(
+            "Collection", "List", "Set", "Map", "Iterable",
+            "ArrayList", "LinkedList", "HashSet", "LinkedHashSet", "TreeSet", "SortedSet"
+        )
+    }
+
     fun analyze(): GraphData = runReadAction {
         val scope = GlobalSearchScope.projectScope(project)
         val facade = JavaPsiFacade.getInstance(project)
@@ -482,15 +490,23 @@ class Jpa3dAnalyzer(private val project: Project) {
             else -> return null
         }
 
-        val target = relationTargetFqn(f, relAnn) ?: return null
+        val target = relationTargetFqn(f, relAnn, knownEntityFqns) ?: return null
         if (target !in knownEntityFqns) return null
 
         val mappedBy = relAnn.stringAttr("mappedBy")
         val label = buildRelationLabel(f, mappedBy)
-        return GraphLink(owner, target, relation, 1, label)
+
+        // MANY_TO_MANY owning side(mappedBy 없음)에서만 조인 테이블 메타를 실어 DDL 이 한 번만 생성.
+        val owningManyToMany = relation == Relation.MANY_TO_MANY && mappedBy.isNullOrBlank()
+        val joinTableName = if (owningManyToMany) {
+            f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_TABLE }
+                ?.stringAttr("name")?.takeIf { it.isNotBlank() }
+        } else null
+
+        return GraphLink(owner, target, relation, 1, label, owningManyToMany, joinTableName)
     }
 
-    private fun relationTargetFqn(f: UField, relAnn: UAnnotation): String? {
+    private fun relationTargetFqn(f: UField, relAnn: UAnnotation, known: Set<String>): String? {
         // targetEntity = Foo.class 가 명시되면 우선
         val targetClassLit = relAnn.findAttributeValue("targetEntity") as? UClassLiteralExpression
         val targetType = targetClassLit?.type as? PsiClassType
@@ -499,13 +515,25 @@ class Jpa3dAnalyzer(private val project: Project) {
         }
 
         val type = f.type as? PsiClassType ?: return null
-        val resolved = type.resolve()
-        if (resolved != null && isCollectionLike(resolved)) {
-            val params = type.parameters
-            if (params.isEmpty()) return null
-            return (params[0] as? PsiClassType)?.resolve()?.qualifiedName
+        // 컬렉션이면 첫 type argument(요소 타입), 아니면 필드 타입 자체.
+        val elementType: PsiClassType = if (isCollectionLikeType(type)) {
+            type.parameters.firstOrNull() as? PsiClassType ?: return null
+        } else {
+            type
         }
-        return resolved?.qualifiedName
+        // 정상 resolve 우선. 실패 시(상호참조 forward reference 등) short name 으로 known 보강.
+        elementType.resolve()?.qualifiedName?.let { return it }
+        val short = elementType.className ?: return null
+        return known.firstOrNull { it.substringAfterLast('.') == short }
+    }
+
+    /**
+     * 필드 타입이 컬렉션류인지. resolve 성공 시 [isCollectionLike] 로 정확 판정,
+     * 실패 시(mockJDK 에서 java.util.* 미해결 등) raw simple name 으로 보강 판정.
+     */
+    private fun isCollectionLikeType(type: PsiClassType): Boolean {
+        type.resolve()?.let { return isCollectionLike(it) }
+        return type.className in COLLECTION_SIMPLE_NAMES
     }
 
     private fun isCollectionLike(c: PsiClass): Boolean {

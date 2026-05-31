@@ -125,6 +125,8 @@ object ExportConverter {
         source = link.source,
         target = link.target,
         type = link.relation.name,
-        label = link.label
+        label = link.label,
+        manyToManyOwning = link.manyToManyOwning,
+        joinTableName = link.joinTableName
     )
 }

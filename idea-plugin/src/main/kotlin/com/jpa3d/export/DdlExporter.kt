@@ -72,6 +72,11 @@ class DdlExporter(
         val emitted = afterJoined.filter { it.kind == "entity" && it.fqn !in skippedFqns }
         val tableByFqn = emitted.associateBy { it.fqn }
 
+        // ManyToMany owning 관계 → 조인 테이블. 양방향이어도 owning 한쪽만 생성된다.
+        val joinTables = model.relations
+            .filter { it.type == "MANY_TO_MANY" && it.manyToManyOwning }
+            .mapNotNull { buildJoinTableSpec(it, tableByFqn) }
+
         // emit 대상의 PK 컬럼이 가진 sequenceName 을 모아 CREATE SEQUENCE.
         // MySQL 은 시퀀스 미지원 — AUTO_INCREMENT 로 fallback (generationClause 에서 처리).
         val sequenceNames: List<String> = emitted.flatMap { e ->
@@ -81,6 +86,8 @@ class DdlExporter(
         // === DROP 순서: TABLE → SEQUENCE — 기존 테이블이 시퀀스를 default 로 참조할 수 있어
         //     시퀀스를 먼저 dropping 하면 의존성 충돌. ===
         if (dropExisting) {
+            // 조인 테이블이 owner/target 을 FK 로 참조하므로 본 테이블보다 먼저 drop.
+            for (jt in joinTables) sb.append(dropTableSql(jt.name)).append("\n")
             for (e in emitted.reversed()) sb.append(renderDrop(e)).append("\n")
             if (dialect != DdlDialect.MYSQL && sequenceNames.isNotEmpty()) {
                 for (s in sequenceNames) sb.append(renderDropSequence(s)).append("\n")
@@ -95,6 +102,7 @@ class DdlExporter(
         }
 
         for (e in emitted) sb.append(renderCreateTable(e)).append("\n")
+        for (jt in joinTables) sb.append(renderJoinTable(jt)).append("\n")
 
         // 단일 컬럼 인덱스/유니크 (column-level 플래그)
         for (e in emitted) {
@@ -120,6 +128,7 @@ class DdlExporter(
                 sb.append(renderFk(e, c, target)).append("\n")
             }
         }
+        for (jt in joinTables) sb.append(renderJoinTableFks(jt)).append("\n")
 
         return sb.toString()
     }
@@ -376,8 +385,10 @@ class DdlExporter(
     }
 
     // ===== DROP =====
-    private fun renderDrop(e: ExportEntity): String {
-        val t = id(tableNameOf(e))
+    private fun renderDrop(e: ExportEntity): String = dropTableSql(tableNameOf(e))
+
+    private fun dropTableSql(rawName: String): String {
+        val t = id(rawName)
         return when (dialect) {
             DdlDialect.POSTGRES, DdlDialect.H2 -> "DROP TABLE IF EXISTS $t CASCADE;"
             DdlDialect.MYSQL -> "DROP TABLE IF EXISTS $t;"
@@ -423,17 +434,61 @@ class DdlExporter(
 
     private fun renderFk(e: ExportEntity, c: ExportColumn, target: ExportEntity): String {
         val targetPks = target.columns.filter { it.primaryKey }
-        val sb = StringBuilder()
-        if (targetPks.size > 1) {
-            sb.append("-- WARNING: target '${target.name}' has composite PK; FK references only first PK column.\n")
-        }
+        val warn = if (targetPks.size > 1)
+            "-- WARNING: target '${target.name}' has composite PK; FK references only first PK column.\n" else ""
         val targetPk = targetPks.firstOrNull()?.columnName ?: "id"
-        val raw = "fk_${tableNameOf(e)}_${c.columnName}".lowercase()
-        val fkName = oracleLimit(raw)
-        sb.append("ALTER TABLE ${id(tableNameOf(e))} ADD CONSTRAINT ${quote(fkName)} ")
-        sb.append("FOREIGN KEY (${id(c.columnName)}) REFERENCES ${id(tableNameOf(target))} (${id(targetPk)});")
-        return sb.toString()
+        return warn + fkAlterSql(tableNameOf(e), c.columnName, tableNameOf(target), targetPk)
     }
+
+    /** `ALTER TABLE t ADD CONSTRAINT fk_t_col FOREIGN KEY (col) REFERENCES ref (refCol);` — FK 공통 형식. */
+    private fun fkAlterSql(table: String, col: String, refTable: String, refCol: String): String {
+        val fkName = oracleLimit("fk_${table}_$col".lowercase())
+        return "ALTER TABLE ${id(table)} ADD CONSTRAINT ${quote(fkName)} " +
+            "FOREIGN KEY (${id(col)}) REFERENCES ${id(refTable)} (${id(refCol)});"
+    }
+
+    // ===== ManyToMany 조인 테이블 =====
+    /**
+     * 조인 테이블의 물리 스펙 — owning @ManyToMany 관계 하나에서 도출.
+     * 컬럼명은 JPA 기본 규칙 `{엔티티명}_{PK컬럼}` (예: student_id), 타입은 양쪽 PK 타입을 상속.
+     */
+    private data class JoinTableSpec(
+        val name: String,
+        val joinColumn: String, val joinColType: String, val ownerTable: String, val ownerPkCol: String,
+        val inverseColumn: String, val inverseColType: String, val targetTable: String, val targetPkCol: String
+    )
+
+    private fun buildJoinTableSpec(r: ExportRelation, tableByFqn: Map<String, ExportEntity>): JoinTableSpec? {
+        val owner = tableByFqn[r.source] ?: return null
+        val target = tableByFqn[r.target] ?: return null
+        val ownerPk = owner.columns.firstOrNull { it.primaryKey }
+        val targetPk = target.columns.firstOrNull { it.primaryKey }
+        val ownerPkCol = ownerPk?.columnName ?: "id"
+        val targetPkCol = targetPk?.columnName ?: "id"
+        return JoinTableSpec(
+            name = r.joinTableName ?: "${tableNameOf(owner)}_${tableNameOf(target)}",
+            joinColumn = "${owner.name}_$ownerPkCol",
+            joinColType = ownerPk?.let { sqlType(it) } ?: bigint(),
+            ownerTable = tableNameOf(owner),
+            ownerPkCol = ownerPkCol,
+            inverseColumn = "${target.name}_$targetPkCol",
+            inverseColType = targetPk?.let { sqlType(it) } ?: bigint(),
+            targetTable = tableNameOf(target),
+            targetPkCol = targetPkCol
+        )
+    }
+
+    private fun renderJoinTable(jt: JoinTableSpec): String = buildString {
+        append("CREATE TABLE ").append(id(jt.name)).append(" (\n")
+        append("    ").append(id(jt.joinColumn)).append(" ").append(jt.joinColType).append(" NOT NULL,\n")
+        append("    ").append(id(jt.inverseColumn)).append(" ").append(jt.inverseColType).append(" NOT NULL,\n")
+        append("    PRIMARY KEY (").append(id(jt.joinColumn)).append(", ").append(id(jt.inverseColumn)).append(")\n")
+        append(");\n")
+    }
+
+    private fun renderJoinTableFks(jt: JoinTableSpec): String =
+        fkAlterSql(jt.name, jt.joinColumn, jt.ownerTable, jt.ownerPkCol) + "\n" +
+            fkAlterSql(jt.name, jt.inverseColumn, jt.targetTable, jt.targetPkCol)
 
     // ===== 식별자 =====
     private fun tableNameOf(e: ExportEntity): String = e.tableName ?: e.name

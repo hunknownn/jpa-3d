@@ -73,7 +73,11 @@ data class ExportRelation(
     val target: String,
     /** EXTENDS / IMPLEMENTS / ONE_TO_MANY / MANY_TO_ONE / ONE_TO_ONE / MANY_TO_MANY / USES_ENTITY. */
     val type: String,
-    val label: String? = null
+    val label: String? = null,
+    /** MANY_TO_MANY owning side 여부 — DDL 조인 테이블 생성 트리거. */
+    val manyToManyOwning: Boolean = false,
+    /** owning @ManyToMany 의 `@JoinTable(name=...)`. 미지정이면 null. */
+    val joinTableName: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

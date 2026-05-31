@@ -105,7 +105,14 @@ data class GraphLink(
     val target: String,
     val relation: Relation,
     val weight: Int,
-    val label: String?
+    val label: String?,
+    /**
+     * MANY_TO_MANY owning side(mappedBy 없는 쪽) 여부. 조인 테이블 DDL 을 이 쪽에서만 생성해
+     * 양방향 관계의 중복 생성을 막는다. 다른 관계나 inverse side 는 false.
+     */
+    val manyToManyOwning: Boolean = false,
+    /** owning @ManyToMany 의 `@JoinTable(name=...)`. 미지정이면 null → DDL 에서 기본 규칙으로 생성. */
+    val joinTableName: String? = null
 )
 
 data class GraphData(
