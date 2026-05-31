@@ -276,6 +276,31 @@ class JpaAttributeCoverageTest : LightJavaCodeInsightFixtureTestCase() {
             Regex("ALTER TABLE sales.orders .*REFERENCES sales.customers").containsMatchIn(sql))
     }
 
+    // ===================================================================================
+    // @Column(columnDefinition=...) — raw 정의 보존 + 경고 주석 (방식 C)
+    // ===================================================================================
+
+    fun testColumnDefinitionIsPreservedRawWithWarning() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity public class Doc {
+                @Id Long id;
+                @Column(columnDefinition = "JSONB DEFAULT '{}'") String payload;
+            }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        val line = column(sql, "payload")
+        assertNotNull("payload 컬럼 없음", line)
+        // 타입 추론(VARCHAR) 대신 raw 정의가 그대로 쓰여야
+        assertTrue("columnDefinition raw 보존 안 됨: $line", line!!.contains("JSONB DEFAULT '{}'"))
+        assertFalse("타입 추론이 잘못 끼어듦: $line", line.contains("VARCHAR"))
+        // 방언 비중립 경고 주석
+        assertTrue("경고 주석 누락:\n$sql", sql.contains("columnDefinition is DB-specific"))
+    }
+
     private fun addEnum() {
         myFixture.addClass("package com.example; public enum Status { ACTIVE, INACTIVE, PENDING }")
     }

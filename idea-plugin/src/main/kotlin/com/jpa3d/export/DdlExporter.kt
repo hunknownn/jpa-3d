@@ -340,7 +340,13 @@ class DdlExporter(
         sb.append("CREATE TABLE ").append(tableName).append(" (\n")
 
         val lines = mutableListOf<String>()
-        for (c in e.columns) lines += "    " + renderColumn(c)
+        for (c in e.columns) {
+            // columnDefinition 은 DB 특정 raw SQL — 별도 주석 줄로 방언 비중립 경고. (콤마 영향 없는 선행 줄)
+            if (c.columnDefinition != null) {
+                lines += "    -- '${c.columnName}' columnDefinition is DB-specific; verify when targeting another dialect"
+            }
+            lines += "    " + renderColumn(c)
+        }
         val pkCols = e.columns.filter { it.primaryKey }
         if (pkCols.isNotEmpty()) {
             val pkList = pkCols.joinToString(", ") { id(it.columnName) }
@@ -352,6 +358,8 @@ class DdlExporter(
     }
 
     private fun renderColumn(c: ExportColumn): String {
+        // columnDefinition 이 있으면 타입/제약 추론을 건너뛰고 raw 정의를 그대로 사용 (JPA 와 동일).
+        c.columnDefinition?.let { return "${id(c.columnName)} $it" }
         val sb = StringBuilder()
         sb.append(id(c.columnName)).append(" ").append(sqlType(c))
         // 정수형 PK 일 때만 generation 절 부착 — UUID/String PK 등에 IDENTITY 가 붙는 잘못된 SQL 방지

@@ -41,7 +41,9 @@ data class ExportColumn(
     /** enum 필드의 `@Enumerated` 전략 ("STRING"/"ORDINAL"). enum 이 아니면 null. */
     val enumType: String? = null,
     /** `@Temporal` 종류 ("DATE"/"TIME"/"TIMESTAMP"). java.util.Date/Calendar 에만 의미. */
-    val temporalType: String? = null
+    val temporalType: String? = null,
+    /** `@Column(columnDefinition=...)` — DB 특정 raw 컬럼 정의. 있으면 타입 추론 대신 그대로 사용. */
+    val columnDefinition: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

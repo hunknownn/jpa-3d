@@ -435,6 +435,7 @@ class Jpa3dAnalyzer(private val project: Project) {
         val length = columnAnn?.intAttr("length")
         val precision = columnAnn?.intAttr("precision")
         val scale = columnAnn?.intAttr("scale")
+        val columnDefinition = columnAnn?.stringAttr("columnDefinition")?.takeIf { it.isNotBlank() }
         val isLob = annotations.any { it.qualifiedName in JpaAnnotations.LOB }
 
         // enum 컬럼 — @Enumerated 명시값 우선, 없어도 필드 타입이 enum 이면 JPA 기본 ORDINAL.
@@ -477,7 +478,8 @@ class Jpa3dAnalyzer(private val project: Project) {
             lob = isLob,
             sequenceName = sequenceName,
             enumType = enumType,
-            temporalType = temporalType
+            temporalType = temporalType,
+            columnDefinition = columnDefinition
         )
     }
 

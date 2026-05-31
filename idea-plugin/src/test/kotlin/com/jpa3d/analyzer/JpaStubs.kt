@@ -73,6 +73,7 @@ internal object JpaStubs {
                 " int length() default 255;" +
                 " int precision() default 0;" +
                 " int scale() default 0;" +
+                " String columnDefinition() default \"\";" +
                 " }"
         )
         fixture.addClass("package jakarta.persistence; public @interface Transient { }")

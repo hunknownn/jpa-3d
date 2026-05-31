@@ -114,7 +114,8 @@ object ExportConverter {
                     lob = c.lob,
                     sequenceName = c.sequenceName,
                     enumType = c.enumType,
-                    temporalType = c.temporalType
+                    temporalType = c.temporalType,
+                    columnDefinition = c.columnDefinition
                 )
             },
             compositeIndexes = e.compositeIndexes,

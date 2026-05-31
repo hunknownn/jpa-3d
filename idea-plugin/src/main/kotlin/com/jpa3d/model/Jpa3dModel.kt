@@ -63,7 +63,12 @@ data class ColumnInfo(
      * `@Temporal` 매핑 종류 ("DATE" / "TIME" / "TIMESTAMP"). java.util.Date / Calendar 에만 의미 —
      * java.time.* 은 타입 자체로 매핑되므로 null.
      */
-    val temporalType: String? = null
+    val temporalType: String? = null,
+    /**
+     * `@Column(columnDefinition=...)` — DB 특정 raw 컬럼 정의. 있으면 타입 추론 대신 이 값을 그대로 쓴다.
+     * 방언 중립이 아니므로 DDL 에 경고 주석과 함께 출력.
+     */
+    val columnDefinition: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
