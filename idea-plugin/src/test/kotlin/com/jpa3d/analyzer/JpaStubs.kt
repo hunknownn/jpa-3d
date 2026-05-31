@@ -128,6 +128,7 @@ internal object JpaStubs {
         fixture.addClass("package jakarta.persistence; public @interface Temporal { TemporalType value(); }")
         fixture.addClass("package jakarta.persistence; public @interface Embedded { }")
         fixture.addClass("package jakarta.persistence; public @interface EmbeddedId { }")
+        fixture.addClass("package jakarta.persistence; public @interface IdClass { Class<?> value(); }")
         fixture.addClass("package jakarta.persistence; public @interface ElementCollection { }")
         fixture.addClass("package jakarta.persistence; public @interface Version { }")
         fixture.addClass("package jakarta.persistence; public @interface Basic { }")

@@ -196,6 +196,56 @@ class JpaAttributeCoverageTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue("@Version Long 은 BIGINT 여야: $line", line!!.contains("BIGINT"))
     }
 
+    // ===================================================================================
+    // 복합 PK — @EmbeddedId / @IdClass
+    // ===================================================================================
+
+    fun testEmbeddedIdProducesCompositePk() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Embeddable public class OrderItemId {
+                @Column(name = "order_id") Long orderId;
+                @Column(name = "product_id") Long productId;
+            }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity public class OrderItem {
+                @EmbeddedId OrderItemId id;
+                @Column(nullable = false) Integer quantity;
+            }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        // EmbeddedId 의 두 필드가 PK 컬럼으로 펼쳐지고 복합 PK 를 구성해야.
+        assertNotNull("order_id 컬럼 펼침 안 됨:\n$sql", column(sql, "order_id"))
+        assertNotNull("product_id 컬럼 펼침 안 됨:\n$sql", column(sql, "product_id"))
+        assertNull("EmbeddedId 가 단일 컬럼으로 잘못 떨어짐:\n$sql", column(sql, "id"))
+        assertTrue("복합 PK 누락:\n$sql", sql.contains("PRIMARY KEY (order_id, product_id)"))
+    }
+
+    fun testIdClassProducesCompositePk() {
+        myFixture.addClass("package com.example; public class OrderKey { Long order; Long product; }")
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity @IdClass(OrderKey.class) public class LineItem {
+                @Id @Column(name = "order_id") Long order;
+                @Id @Column(name = "product_id") Long product;
+                Integer quantity;
+            }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        assertTrue("@IdClass 복합 PK 누락:\n$sql", sql.contains("PRIMARY KEY (order_id, product_id)"))
+    }
+
     private fun addEnum() {
         myFixture.addClass("package com.example; public enum Status { ACTIVE, INACTIVE, PENDING }")
     }

@@ -227,6 +227,11 @@ class Jpa3dAnalyzer(private val project: Project) {
             // @ElementCollection 은 별도 컬렉션 테이블로 매핑됨 — 호스트 테이블 컬럼이 아니므로 스킵.
             // (컬렉션 테이블 자체는 아직 미모델링. 최소한 잘못된 VARCHAR 컬럼이 생기지 않게.)
             if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.ELEMENT_COLLECTION }) continue
+            // @EmbeddedId — @Embeddable PK 클래스의 필드들을 복합 PK 컬럼으로 펼침.
+            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.EMBEDDED_ID }) {
+                columns.addAll(expandEmbedded(f, indexedCols, uniqueCols, sequenceGenerators, asPrimaryKey = true))
+                continue
+            }
             // @Embedded — @Embeddable 의 필드들을 호스트 테이블에 인라인으로 펼침.
             if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.EMBEDDED }) {
                 columns.addAll(expandEmbedded(f, indexedCols, uniqueCols, sequenceGenerators))
@@ -389,22 +394,26 @@ class Jpa3dAnalyzer(private val project: Project) {
             .filter { it.isNotEmpty() }
 
     /**
-     * `@Embedded` 필드를 그 [Embeddable] 타입의 컬럼들로 펼친다 (호스트 테이블에 인라인).
+     * `@Embedded` / `@EmbeddedId` 필드를 그 [Embeddable] 타입의 컬럼들로 펼친다 (호스트 테이블에 인라인).
      * embeddable 안의 필드도 `@Column` / `@Enumerated` 등 일반 컬럼 규칙을 그대로 따르므로
      * [buildColumn] 을 재사용. static / `@Transient` 필드는 제외. (@AttributeOverride 는 미지원.)
+     *
+     * @param asPrimaryKey `@EmbeddedId` 면 true — 펼친 컬럼 전부를 복합 PK(primaryKey, NOT NULL)로 표시.
      */
     private fun expandEmbedded(
         f: UField,
         indexedCols: Set<String>,
         uniqueCols: Set<String>,
-        sequenceGenerators: Map<String, String>
+        sequenceGenerators: Map<String, String>,
+        asPrimaryKey: Boolean = false
     ): List<ColumnInfo> {
         val embeddable = (f.type as? PsiClassType)?.resolve()?.toUElementOfType<UClass>() ?: return emptyList()
         return embeddable.fields.mapNotNull { ef ->
             val psi = ef.javaPsi as? PsiField
             if (psi?.hasModifierProperty(PsiModifier.STATIC) == true) return@mapNotNull null
             if (ef.uAnnotations.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) return@mapNotNull null
-            buildColumn(ef, indexedCols, uniqueCols, sequenceGenerators)
+            val col = buildColumn(ef, indexedCols, uniqueCols, sequenceGenerators)
+            if (asPrimaryKey) col.copy(primaryKey = true, nullable = false) else col
         }
     }
 

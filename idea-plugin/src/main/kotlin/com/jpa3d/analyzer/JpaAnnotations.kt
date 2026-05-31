@@ -30,6 +30,7 @@ object JpaAnnotations {
     val TEMPORAL = setOf("jakarta.persistence.Temporal", "javax.persistence.Temporal")
     val ELEMENT_COLLECTION = setOf("jakarta.persistence.ElementCollection", "javax.persistence.ElementCollection")
     val EMBEDDED = setOf("jakarta.persistence.Embedded", "javax.persistence.Embedded")
+    val EMBEDDED_ID = setOf("jakarta.persistence.EmbeddedId", "javax.persistence.EmbeddedId")
 
     // 관계
     val ONE_TO_MANY = setOf("jakarta.persistence.OneToMany", "javax.persistence.OneToMany")
