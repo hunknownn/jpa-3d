@@ -111,7 +111,9 @@ object ExportConverter {
                     precision = c.precision,
                     scale = c.scale,
                     lob = c.lob,
-                    sequenceName = c.sequenceName
+                    sequenceName = c.sequenceName,
+                    enumType = c.enumType,
+                    temporalType = c.temporalType
                 )
             },
             compositeIndexes = e.compositeIndexes,

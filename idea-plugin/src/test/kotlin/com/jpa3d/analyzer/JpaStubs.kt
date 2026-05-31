@@ -120,5 +120,16 @@ internal object JpaStubs {
                 " String mappedBy() default \"\";" +
                 " }"
         )
+
+        // @Enumerated / @Temporal / @Embedded / @Version / @ElementCollection — DDL 매핑 영향 속성
+        fixture.addClass("package jakarta.persistence; public enum EnumType { ORDINAL, STRING }")
+        fixture.addClass("package jakarta.persistence; public @interface Enumerated { EnumType value() default EnumType.ORDINAL; }")
+        fixture.addClass("package jakarta.persistence; public enum TemporalType { DATE, TIME, TIMESTAMP }")
+        fixture.addClass("package jakarta.persistence; public @interface Temporal { TemporalType value(); }")
+        fixture.addClass("package jakarta.persistence; public @interface Embedded { }")
+        fixture.addClass("package jakarta.persistence; public @interface EmbeddedId { }")
+        fixture.addClass("package jakarta.persistence; public @interface ElementCollection { }")
+        fixture.addClass("package jakarta.persistence; public @interface Version { }")
+        fixture.addClass("package jakarta.persistence; public @interface Basic { }")
     }
 }

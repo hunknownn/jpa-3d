@@ -53,7 +53,17 @@ data class ColumnInfo(
      * 에서 추출한 시퀀스 객체의 실제 이름. strategy=SEQUENCE 인데 generator 가 비어있으면 Hibernate 기본
      * "hibernate_sequence".
      */
-    val sequenceName: String? = null
+    val sequenceName: String? = null,
+    /**
+     * 필드 타입이 enum 일 때 `@Enumerated` 매핑 전략. "STRING" → VARCHAR, "ORDINAL" → 정수.
+     * `@Enumerated` 미지정 enum 은 JPA 기본 "ORDINAL". enum 이 아니면 null.
+     */
+    val enumType: String? = null,
+    /**
+     * `@Temporal` 매핑 종류 ("DATE" / "TIME" / "TIMESTAMP"). java.util.Date / Calendar 에만 의미 —
+     * java.time.* 은 타입 자체로 매핑되므로 null.
+     */
+    val temporalType: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

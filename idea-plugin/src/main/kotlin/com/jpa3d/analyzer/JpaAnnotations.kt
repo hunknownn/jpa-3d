@@ -26,6 +26,10 @@ object JpaAnnotations {
     val JOIN_TABLE = setOf("jakarta.persistence.JoinTable", "javax.persistence.JoinTable")
     val LOB = setOf("jakarta.persistence.Lob", "javax.persistence.Lob")
     val SEQUENCE_GENERATOR = setOf("jakarta.persistence.SequenceGenerator", "javax.persistence.SequenceGenerator")
+    val ENUMERATED = setOf("jakarta.persistence.Enumerated", "javax.persistence.Enumerated")
+    val TEMPORAL = setOf("jakarta.persistence.Temporal", "javax.persistence.Temporal")
+    val ELEMENT_COLLECTION = setOf("jakarta.persistence.ElementCollection", "javax.persistence.ElementCollection")
+    val EMBEDDED = setOf("jakarta.persistence.Embedded", "javax.persistence.Embedded")
 
     // 관계
     val ONE_TO_MANY = setOf("jakarta.persistence.OneToMany", "javax.persistence.OneToMany")

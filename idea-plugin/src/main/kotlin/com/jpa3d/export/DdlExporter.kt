@@ -428,6 +428,10 @@ class DdlExporter(
         val simple = c.javaType.substringAfterLast('.')
         // @Lob 우선 처리 — length 무시하고 큰 텍스트/바이너리 타입으로.
         if (c.lob) return lobType(simple)
+        // enum — javaType 은 enum FQN 이라 아래 when 으론 안 잡힘. ORDINAL→정수, STRING→VARCHAR.
+        c.enumType?.let { return if (it.uppercase() == "ORDINAL") integer() else varchar(c.length ?: 255) }
+        // @Temporal — java.util.Date/Calendar 의 DATE/TIME/TIMESTAMP 구분.
+        c.temporalType?.let { return temporalSqlType(it) }
         return when (simple) {
             "String" -> varchar(c.length ?: 255)
             "Long", "long" -> bigint()
@@ -464,6 +468,19 @@ class DdlExporter(
                 DdlDialect.H2 -> "VARBINARY"
             }
             else -> varchar(c.length ?: 255) // enum / unknown → VARCHAR fallback
+        }
+    }
+
+    /** @Temporal 종류 → SQL 타입. java.time.LocalDate/LocalTime/LocalDateTime 매핑과 동일 규칙. */
+    private fun temporalSqlType(kind: String): String = when (kind.uppercase()) {
+        "DATE" -> "DATE"
+        "TIME" -> when (dialect) {
+            DdlDialect.ORACLE -> "VARCHAR2(8)" // Oracle TIME 미지원 — 문자열 fallback
+            else -> "TIME(6)"
+        }
+        else -> when (dialect) { // TIMESTAMP (기본)
+            DdlDialect.MYSQL -> "DATETIME(6)"
+            else -> "TIMESTAMP(6)"
         }
     }
 

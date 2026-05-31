@@ -216,6 +216,14 @@ class Jpa3dAnalyzer(private val project: Project) {
             val psiField = f.javaPsi as? PsiField
             if (psiField?.hasModifierProperty(PsiModifier.STATIC) == true) continue
             if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) continue
+            // @ElementCollection 은 별도 컬렉션 테이블로 매핑됨 — 호스트 테이블 컬럼이 아니므로 스킵.
+            // (컬렉션 테이블 자체는 아직 미모델링. 최소한 잘못된 VARCHAR 컬럼이 생기지 않게.)
+            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.ELEMENT_COLLECTION }) continue
+            // @Embedded — @Embeddable 의 필드들을 호스트 테이블에 인라인으로 펼침.
+            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.EMBEDDED }) {
+                columns.addAll(expandEmbedded(f, indexedCols, uniqueCols, sequenceGenerators))
+                continue
+            }
 
             val relAnnotation = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.RELATION_ANNOTATIONS }
             if (relAnnotation != null) {
@@ -372,6 +380,26 @@ class Jpa3dAnalyzer(private val project: Project) {
             .map { it.trim().substringBefore(' ') }
             .filter { it.isNotEmpty() }
 
+    /**
+     * `@Embedded` 필드를 그 [Embeddable] 타입의 컬럼들로 펼친다 (호스트 테이블에 인라인).
+     * embeddable 안의 필드도 `@Column` / `@Enumerated` 등 일반 컬럼 규칙을 그대로 따르므로
+     * [buildColumn] 을 재사용. static / `@Transient` 필드는 제외. (@AttributeOverride 는 미지원.)
+     */
+    private fun expandEmbedded(
+        f: UField,
+        indexedCols: Set<String>,
+        uniqueCols: Set<String>,
+        sequenceGenerators: Map<String, String>
+    ): List<ColumnInfo> {
+        val embeddable = (f.type as? PsiClassType)?.resolve()?.toUElementOfType<UClass>() ?: return emptyList()
+        return embeddable.fields.mapNotNull { ef ->
+            val psi = ef.javaPsi as? PsiField
+            if (psi?.hasModifierProperty(PsiModifier.STATIC) == true) return@mapNotNull null
+            if (ef.uAnnotations.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) return@mapNotNull null
+            buildColumn(ef, indexedCols, uniqueCols, sequenceGenerators)
+        }
+    }
+
     private fun buildColumn(
         f: UField,
         indexedCols: Set<String>,
@@ -391,6 +419,17 @@ class Jpa3dAnalyzer(private val project: Project) {
         val precision = columnAnn?.intAttr("precision")
         val scale = columnAnn?.intAttr("scale")
         val isLob = annotations.any { it.qualifiedName in JpaAnnotations.LOB }
+
+        // enum 컬럼 — @Enumerated 명시값 우선, 없어도 필드 타입이 enum 이면 JPA 기본 ORDINAL.
+        val enumAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.ENUMERATED }
+        val enumType: String? = when {
+            enumAnn != null -> enumAnn.findAttributeValue("value")?.let { extractEnumName(it) } ?: "ORDINAL"
+            isEnumType(f.type) -> "ORDINAL"
+            else -> null
+        }
+        // @Temporal — java.util.Date/Calendar 의 DATE/TIME/TIMESTAMP 구분.
+        val temporalType: String? = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.TEMPORAL }
+            ?.findAttributeValue("value")?.let { extractEnumName(it) }
 
         // GeneratedValue.strategy 는 enum reference — UReferenceExpression 의 resolvedName 사용
         val strategy = generatedAnn?.findAttributeValue("strategy")?.let { extractEnumName(it) }
@@ -419,9 +458,15 @@ class Jpa3dAnalyzer(private val project: Project) {
             precision = precision,
             scale = scale,
             lob = isLob,
-            sequenceName = sequenceName
+            sequenceName = sequenceName,
+            enumType = enumType,
+            temporalType = temporalType
         )
     }
+
+    /** 필드 타입이 enum 클래스인지 — `@Enumerated` 없는 enum 의 기본 매핑(ORDINAL) 판단용. */
+    private fun isEnumType(type: PsiType): Boolean =
+        (type as? PsiClassType)?.resolve()?.isEnum == true
 
     private fun buildRelationLink(
         owner: String,

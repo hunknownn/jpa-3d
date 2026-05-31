@@ -37,7 +37,11 @@ data class ExportColumn(
     /** `@Lob` 여부. true 면 CLOB/BLOB 로 매핑. */
     val lob: Boolean = false,
     /** `@SequenceGenerator(sequenceName=...)` 로 추출한 실제 시퀀스 이름. SEQUENCE 전략에서만 의미. */
-    val sequenceName: String? = null
+    val sequenceName: String? = null,
+    /** enum 필드의 `@Enumerated` 전략 ("STRING"/"ORDINAL"). enum 이 아니면 null. */
+    val enumType: String? = null,
+    /** `@Temporal` 종류 ("DATE"/"TIME"/"TIMESTAMP"). java.util.Date/Calendar 에만 의미. */
+    val temporalType: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
