@@ -59,6 +59,8 @@ data class ExportEntity(
     /** "entity" / "mappedSuperclass" / "embeddable". */
     val kind: String,
     val tableName: String? = null,
+    /** `@Table(schema=...)`. DDL 에서 `schema.table` 로 한정. */
+    val schema: String? = null,
     val inheritance: ExportInheritance? = null,
     val columns: List<ExportColumn>,
     /** 복합(2+ 컬럼) 인덱스 그룹. 단일 컬럼은 [ExportColumn.indexed] 로. */

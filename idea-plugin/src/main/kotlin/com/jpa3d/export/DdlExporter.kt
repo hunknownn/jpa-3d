@@ -87,7 +87,7 @@ class DdlExporter(
         //     시퀀스를 먼저 dropping 하면 의존성 충돌. ===
         if (dropExisting) {
             // 조인 테이블이 owner/target 을 FK 로 참조하므로 본 테이블보다 먼저 drop.
-            for (jt in joinTables) sb.append(dropTableSql(jt.name)).append("\n")
+            for (jt in joinTables) sb.append(dropTableSql(id(jt.name))).append("\n")
             for (e in emitted.reversed()) sb.append(renderDrop(e)).append("\n")
             if (dialect != DdlDialect.MYSQL && sequenceNames.isNotEmpty()) {
                 for (s in sequenceNames) sb.append(renderDropSequence(s)).append("\n")
@@ -335,7 +335,7 @@ class DdlExporter(
 
     // ===== CREATE TABLE / 컬럼 =====
     private fun renderCreateTable(e: ExportEntity): String {
-        val tableName = id(tableNameOf(e))
+        val tableName = qualifiedTable(e)
         val sb = StringBuilder()
         sb.append("CREATE TABLE ").append(tableName).append(" (\n")
 
@@ -385,10 +385,10 @@ class DdlExporter(
     }
 
     // ===== DROP =====
-    private fun renderDrop(e: ExportEntity): String = dropTableSql(tableNameOf(e))
+    private fun renderDrop(e: ExportEntity): String = dropTableSql(qualifiedTable(e))
 
-    private fun dropTableSql(rawName: String): String {
-        val t = id(rawName)
+    /** [t] 는 이미 quoting/스키마 한정된 테이블 식별자 표현. */
+    private fun dropTableSql(t: String): String {
         return when (dialect) {
             DdlDialect.POSTGRES, DdlDialect.H2 -> "DROP TABLE IF EXISTS $t CASCADE;"
             DdlDialect.MYSQL -> "DROP TABLE IF EXISTS $t;"
@@ -414,13 +414,13 @@ class DdlExporter(
     private fun renderIndex(e: ExportEntity, c: ExportColumn): String {
         val raw = "idx_${tableNameOf(e)}_${c.columnName}".lowercase()
         val idxName = oracleLimit(raw)
-        return "CREATE INDEX ${quote(idxName)} ON ${id(tableNameOf(e))} (${id(c.columnName)});"
+        return "CREATE INDEX ${quote(idxName)} ON ${qualifiedTable(e)} (${id(c.columnName)});"
     }
 
     private fun renderUniqueIndex(e: ExportEntity, c: ExportColumn): String {
         val raw = "uq_${tableNameOf(e)}_${c.columnName}".lowercase()
         val idxName = oracleLimit(raw)
-        return "CREATE UNIQUE INDEX ${quote(idxName)} ON ${id(tableNameOf(e))} (${id(c.columnName)});"
+        return "CREATE UNIQUE INDEX ${quote(idxName)} ON ${qualifiedTable(e)} (${id(c.columnName)});"
     }
 
     private fun renderCompositeIndex(e: ExportEntity, cols: List<String>, unique: Boolean): String {
@@ -429,7 +429,7 @@ class DdlExporter(
         val idxName = oracleLimit(raw)
         val colList = cols.joinToString(", ") { id(it) }
         val kw = if (unique) "CREATE UNIQUE INDEX" else "CREATE INDEX"
-        return "$kw ${quote(idxName)} ON ${id(tableNameOf(e))} ($colList);"
+        return "$kw ${quote(idxName)} ON ${qualifiedTable(e)} ($colList);"
     }
 
     private fun renderFk(e: ExportEntity, c: ExportColumn, target: ExportEntity): String {
@@ -437,14 +437,23 @@ class DdlExporter(
         val warn = if (targetPks.size > 1)
             "-- WARNING: target '${target.name}' has composite PK; FK references only first PK column.\n" else ""
         val targetPk = targetPks.firstOrNull()?.columnName ?: "id"
-        return warn + fkAlterSql(tableNameOf(e), c.columnName, tableNameOf(target), targetPk)
+        return warn + fkAlterSql(
+            qualifiedTable(e), id(c.columnName),
+            qualifiedTable(target), id(targetPk),
+            "fk_${tableNameOf(e)}_${c.columnName}"
+        )
     }
 
-    /** `ALTER TABLE t ADD CONSTRAINT fk_t_col FOREIGN KEY (col) REFERENCES ref (refCol);` — FK 공통 형식. */
-    private fun fkAlterSql(table: String, col: String, refTable: String, refCol: String): String {
-        val fkName = oracleLimit("fk_${table}_$col".lowercase())
-        return "ALTER TABLE ${id(table)} ADD CONSTRAINT ${quote(fkName)} " +
-            "FOREIGN KEY (${id(col)}) REFERENCES ${id(refTable)} (${id(refCol)});"
+    /**
+     * `ALTER TABLE t ADD CONSTRAINT fk FOREIGN KEY (col) REFERENCES ref (refCol);` — FK 공통 형식.
+     * 인자는 이미 quoting/스키마 한정된 식별자 표현. 제약명은 [fkBaseName] (스키마 미포함) 으로 생성.
+     */
+    private fun fkAlterSql(
+        tableExpr: String, colExpr: String, refTableExpr: String, refColExpr: String, fkBaseName: String
+    ): String {
+        val fkName = oracleLimit(fkBaseName.lowercase())
+        return "ALTER TABLE $tableExpr ADD CONSTRAINT ${quote(fkName)} " +
+            "FOREIGN KEY ($colExpr) REFERENCES $refTableExpr ($refColExpr);"
     }
 
     // ===== ManyToMany 조인 테이블 =====
@@ -487,11 +496,19 @@ class DdlExporter(
     }
 
     private fun renderJoinTableFks(jt: JoinTableSpec): String =
-        fkAlterSql(jt.name, jt.joinColumn, jt.ownerTable, jt.ownerPkCol) + "\n" +
-            fkAlterSql(jt.name, jt.inverseColumn, jt.targetTable, jt.targetPkCol)
+        fkAlterSql(id(jt.name), id(jt.joinColumn), id(jt.ownerTable), id(jt.ownerPkCol),
+            "fk_${jt.name}_${jt.joinColumn}") + "\n" +
+            fkAlterSql(id(jt.name), id(jt.inverseColumn), id(jt.targetTable), id(jt.targetPkCol),
+                "fk_${jt.name}_${jt.inverseColumn}")
 
     // ===== 식별자 =====
     private fun tableNameOf(e: ExportEntity): String = e.tableName ?: e.name
+
+    /** `@Table(schema=...)` 가 있으면 `"schema"."table"` 로 한정, 없으면 테이블 식별자만. */
+    private fun qualifiedTable(e: ExportEntity): String {
+        val table = id(tableNameOf(e))
+        return e.schema?.let { "${id(it)}.$table" } ?: table
+    }
 
     /** snake_case 변환 + 방언별 quoting 을 한 번에. */
     private fun id(name: String): String = quote(if (snakeCase) toSnakeCase(name) else name)

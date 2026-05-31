@@ -246,6 +246,36 @@ class JpaAttributeCoverageTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue("@IdClass 복합 PK 누락:\n$sql", sql.contains("PRIMARY KEY (order_id, product_id)"))
     }
 
+    // ===================================================================================
+    // @Table(schema=...) — 스키마 한정 테이블명
+    // ===================================================================================
+
+    fun testTableSchemaQualifiesTableName() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity @Table(name = "orders", schema = "sales")
+            public class Order {
+                @Id Long id;
+                @ManyToOne @JoinColumn(name = "customer_id") Customer customer;
+            }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity @Table(name = "customers", schema = "sales")
+            public class Customer { @Id Long id; }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        assertTrue("스키마 한정 CREATE 누락:\n$sql", sql.contains("CREATE TABLE sales.orders"))
+        assertTrue("FK 의 스키마 한정 참조 누락:\n$sql",
+            Regex("ALTER TABLE sales.orders .*REFERENCES sales.customers").containsMatchIn(sql))
+    }
+
     private fun addEnum() {
         myFixture.addClass("package com.example; public enum Status { ACTIVE, INACTIVE, PENDING }")
     }

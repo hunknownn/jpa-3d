@@ -88,6 +88,7 @@ object ExportConverter {
             `package` = node.pkg,
             kind = e.kind,
             tableName = e.tableName ?: node.name,
+            schema = e.schema,
             inheritance = e.inheritance?.let {
                 ExportInheritance(
                     strategy = it.strategy,

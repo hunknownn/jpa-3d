@@ -583,8 +583,10 @@ class Jpa3dAnalyzer(private val project: Project) {
     ): GraphNode {
         val u = rec.uClass
         val psi = u.javaPsi
-        val tableName = u.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.TABLE }
-            ?.stringAttr("name")
+        val tableAnn = u.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.TABLE }
+        // name/schema 미지정은 빈 문자열로 들어오므로 null 정규화 (JPA 규약상 각각 기본값 사용).
+        val tableName = tableAnn?.stringAttr("name")?.takeIf { it.isNotBlank() }
+        val schema = tableAnn?.stringAttr("schema")?.takeIf { it.isNotBlank() }
         return GraphNode(
             id = u.qualifiedName ?: u.name ?: "",
             name = u.name ?: psi.name ?: "",
@@ -594,6 +596,7 @@ class Jpa3dAnalyzer(private val project: Project) {
             entity = EntityInfo(
                 kind = rec.kind.jsonValue,
                 tableName = tableName,
+                schema = schema,
                 columns = columns,
                 inheritance = extractInheritance(u),
                 compositeIndexes = constraints.compositeIndexes(),

@@ -80,6 +80,8 @@ data class InheritanceInfo(
 data class EntityInfo(
     val kind: String,      // EntityKind.jsonValue ("entity" / "mappedSuperclass" / "embeddable")
     val tableName: String?,
+    /** `@Table(schema=...)`. DDL 에서 `schema.table` 로 한정. 미지정이면 null. */
+    val schema: String? = null,
     val columns: List<ColumnInfo>,
     /** @Inheritance 가 붙은 상속 베이스 또는 그 자식. 아니면 null. */
     val inheritance: InheritanceInfo? = null,
