@@ -63,9 +63,13 @@ class DdlExporter(
         val afterAncestor =
             if (parentOf.isEmpty()) afterSingleTable
             else mergeAncestorColumns(afterSingleTable, parentOf, byFqn)
+        // JOINED 자식에 부모 PK 를 PK+FK 로 주입 (mergeAncestorColumns 가 JOINED 는 건드리지 않으므로 별도 단계).
+        val afterJoined =
+            if (parentOf.isEmpty()) afterAncestor
+            else mergeJoinedPk(afterAncestor, parentOf, byFqn)
 
         // emit 대상: 실제 테이블이 되는 kind="entity" 이면서 SINGLE_TABLE 자식이 아닌 것
-        val emitted = afterAncestor.filter { it.kind == "entity" && it.fqn !in skippedFqns }
+        val emitted = afterJoined.filter { it.kind == "entity" && it.fqn !in skippedFqns }
         val tableByFqn = emitted.associateBy { it.fqn }
 
         // emit 대상의 PK 컬럼이 가진 sequenceName 을 모아 CREATE SEQUENCE.
@@ -273,6 +277,51 @@ class DdlExporter(
             val merged = ancestors.filter { it.columnName.lowercase() !in ownNames } + e.columns
             e.copy(columns = merged)
         }
+    }
+
+    // ===== JOINED 상속 PK 주입 =====
+    /**
+     * JOINED 전략 자식 테이블에 부모 PK 를 PK 이자 부모 참조 FK 로 주입한다.
+     *
+     * JOINED 는 부모/자식을 별도 테이블로 두되, 자식 PK 가 부모 PK 를 그대로 참조(공유)한다.
+     * 자식이 자기 `@Id` 를 선언하지 않으므로 부모 PK 컬럼을 빌려와 PK+FK 로 표시.
+     * 생성 전략(IDENTITY/SEQUENCE)은 값을 부모에서 받으므로 제거한다.
+     * (부모 own 컬럼은 복사하지 않음 — TABLE_PER_CLASS 와 다른 점.)
+     */
+    private fun mergeJoinedPk(
+        entities: List<ExportEntity>,
+        parentOf: Map<String, String>,
+        byFqn: Map<String, ExportEntity>
+    ): List<ExportEntity> = entities.map { e ->
+        if (e.kind != "entity" || e.inheritance?.strategy != "JOINED") return@map e
+        if (e.columns.any { it.primaryKey }) return@map e // 자체 @Id 보유 시 그대로
+        val parentFqn = parentOf[e.fqn] ?: return@map e
+        val parentPk = findInheritedPk(parentFqn, parentOf, byFqn) ?: return@map e
+        val pkCol = parentPk.copy(
+            primaryKey = true,
+            foreignKey = true,
+            fkTarget = parentFqn,
+            generatedValue = null,
+            sequenceName = null
+        )
+        e.copy(columns = listOf(pkCol) + e.columns)
+    }
+
+    /** [fqn] 부터 EXTENDS 체인을 올라가며 PK 컬럼을 가진 첫 조상의 PK 를 찾는다. */
+    private fun findInheritedPk(
+        fqn: String,
+        parentOf: Map<String, String>,
+        byFqn: Map<String, ExportEntity>
+    ): ExportColumn? {
+        var cur: String? = fqn
+        val seen = mutableSetOf<String>()
+        while (cur != null && cur !in seen) {
+            seen.add(cur)
+            val e = byFqn[cur] ?: return null
+            e.columns.firstOrNull { it.primaryKey }?.let { return it }
+            cur = parentOf[cur]
+        }
+        return null
     }
 
     // ===== CREATE TABLE / 컬럼 =====

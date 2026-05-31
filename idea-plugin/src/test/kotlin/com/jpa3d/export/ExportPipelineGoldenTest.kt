@@ -132,6 +132,46 @@ class ExportPipelineGoldenTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     // ===================================================================================
+    // JOINED 상속 — 자식 테이블이 부모 PK 를 자기 PK 이자 부모 참조 FK 로 상속
+    // ===================================================================================
+
+    fun testJoinedInheritanceChildHasPkAndFkToParent() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            @Inheritance(strategy = InheritanceType.JOINED)
+            public class Vehicle { @Id Long id; String name; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Car extends Vehicle { Integer doors; }
+            """.trimIndent()
+        )
+        val sql = ddl()
+        // 부모/자식 둘 다 별도 테이블
+        assertContains(sql, "CREATE TABLE vehicle")
+        assertContains(sql, "CREATE TABLE car")
+        // 자식이 부모 own 컬럼(name)을 복사하지 않음 — JOINED 는 분리 저장
+        val carBlock = sql.substringAfter("CREATE TABLE car").substringBefore(");")
+        assertFalse("JOINED 자식이 부모 컬럼(name)을 잘못 복사:\n$carBlock", carBlock.contains("name"))
+        // 자식 PK = 부모 PK 컬럼(id), 타입도 상속(BIGINT)
+        assertTrue("자식에 상속 PK(id BIGINT) 누락:\n$carBlock", Regex("id\\s+BIGINT").containsMatchIn(carBlock))
+        assertTrue("자식 PRIMARY KEY(id) 누락:\n$carBlock", carBlock.contains("PRIMARY KEY (id)"))
+        // 자식 PK → 부모 PK 참조 FK
+        assertTrue("car.id → vehicle.id FK 누락:\n$sql",
+            Regex("ALTER TABLE car .*FOREIGN KEY \\(id\\) REFERENCES vehicle \\(id\\)").containsMatchIn(sql))
+        // 자식 PK 는 부모에서 받으므로 자체 IDENTITY/생성 절이 붙으면 안 됨
+        assertFalse("자식 PK 에 잘못된 IDENTITY 생성절:\n$carBlock",
+            carBlock.contains("IDENTITY") || carBlock.contains("nextval"))
+    }
+
+    // ===================================================================================
     // @SequenceGenerator — CREATE SEQUENCE (Postgres)
     // ===================================================================================
 
