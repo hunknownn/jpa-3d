@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import GraphView, { GraphHandle } from "./GraphView";
-import ErdView2D from "./ErdView2D";
+import ErdView2D, { Erd2dHandle } from "./ErdView2D";
 import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
 
@@ -61,6 +61,40 @@ export default function ErdApp() {
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   const [refreshTick, setRefreshTick] = useState(0);
   const graphRef = useRef<GraphHandle>(null);
+  const erd2dRef = useRef<Erd2dHandle>(null);
+
+  // === Plugin → Viewer snapshot 브리지 ===
+  // 최신 view mode 와 ref 를 effect 안에서 잡아 외부에 전역으로 노출.
+  // plugin 측 ViewerSnapshot 가 window.__JPA3D_SNAPSHOT__/__JPA3D_VIEW_STATE__ 을 호출.
+  useEffect(() => {
+    const w = window as unknown as {
+      __JPA3D_VIEW_STATE__?: () => { mode: ViewMode };
+      __JPA3D_SNAPSHOT__?: (format: "png" | "svg") => Promise<{ format: string; data?: string; error?: string }>;
+    };
+    w.__JPA3D_VIEW_STATE__ = () => ({ mode: params.view });
+    w.__JPA3D_SNAPSHOT__ = async (format) => {
+      try {
+        if (params.view === "2d") {
+          if (format === "svg") {
+            const data = erd2dRef.current?.snapshotSvg() ?? "";
+            return data ? { format, data } : { format, error: "2D view not ready" };
+          }
+          const data = (await erd2dRef.current?.snapshotPng()) ?? "";
+          return data ? { format, data } : { format, error: "2D view not ready" };
+        }
+        // 3D
+        if (format === "svg") return { format, error: "SVG snapshot is not supported in 3D view" };
+        const data = graphRef.current?.snapshotPng() ?? "";
+        return data ? { format, data } : { format, error: "3D view not ready" };
+      } catch (e) {
+        return { format, error: String((e as Error)?.message ?? e) };
+      }
+    };
+    return () => {
+      delete w.__JPA3D_VIEW_STATE__;
+      delete w.__JPA3D_SNAPSHOT__;
+    };
+  }, [params.view]);
 
   // 윈도우 리사이즈
   useEffect(() => {
@@ -230,6 +264,7 @@ export default function ErdApp() {
           <div style={{ padding: 24, color: "#f87171" }}>{error}</div>
         ) : params.view === "2d" ? (
           <ErdView2D
+            ref={erd2dRef}
             data={data}
             width={size.w}
             height={size.h - 48}

@@ -68,5 +68,20 @@
             secondary="false"
             icon="AllIcons.Toolwindows.ToolWindowHierarchy"
             factoryClass="com.jpa3d.Jpa3dToolWindowFactory"/>
+
+        <notificationGroup id="JPA 3D Export" displayType="BALLOON"/>
     </extensions>
+
+    <actions>
+        <!--
+            Export 액션 — Tools 메뉴에만 정적 등록.
+            ToolWindow 툴바/기어 메뉴는 동적으로 Jpa3dToolWindowFactory 가 부착한다.
+        -->
+        <action id="JPA3D.Export"
+                class="com.jpa3d.export.ExportAction"
+                text="JPA 3D: Export..."
+                description="JPA 3D 모델을 JSON / DDL / Mermaid / PlantUML / SVG 로 export">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
 </idea-plugin>

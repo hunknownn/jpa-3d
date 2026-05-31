@@ -7,6 +7,12 @@ export interface GraphHandle {
   zoomIn(): void;
   zoomOut(): void;
   fit(): void;
+  /**
+   * 현재 WebGL canvas 를 PNG dataURL 로 캡처.
+   * preserveDrawingBuffer 가 꺼진 기본 설정에선 toDataURL 직전에 한 번 render 를 다시 호출해야
+   * back buffer 가 비어있지 않다 — 같은 JS turn 안에서 sync 호출하면 정상 캡처된다.
+   */
+  snapshotPng(): string;
 }
 
 const RELATION_COLOR: Record<Relation, string> = {
@@ -280,7 +286,18 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
   useImperativeHandle(ref, () => ({
     zoomIn: () => zoomBy(0.8),
     zoomOut: () => zoomBy(1.25),
-    fit: () => fgRef.current?.zoomToFit(400, 80)
+    fit: () => fgRef.current?.zoomToFit(400, 80),
+    snapshotPng: () => {
+      const fg = fgRef.current as any;
+      if (!fg) return "";
+      const renderer = fg.renderer?.();
+      const scene = fg.scene?.();
+      const camera = fg.camera?.();
+      if (!renderer || !scene || !camera) return "";
+      // 같은 turn 안에서 render → toDataURL 호출. WebGL back buffer 가 유효한 시점.
+      renderer.render(scene, camera);
+      return (renderer.domElement as HTMLCanvasElement).toDataURL("image/png");
+    }
   }), []);
 
   // ForceGraph 는 source/target 을 객체 참조로 바꾸기 때문에 매 렌더 새 객체를 넘긴다.

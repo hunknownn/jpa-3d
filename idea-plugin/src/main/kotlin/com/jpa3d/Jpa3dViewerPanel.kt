@@ -10,6 +10,8 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.ui.jcef.JBCefApp
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
+import com.intellij.ui.jcef.JBCefBrowserBuilder
+import com.intellij.ui.jcef.JBCefClient
 import com.intellij.ui.jcef.JBCefJSQuery
 import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import javax.swing.JComponent
@@ -35,8 +37,24 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
         if (!JBCefApp.isSupported()) {
             component = JLabel("이 IDE 빌드는 JCEF 를 지원하지 않습니다.", SwingConstants.CENTER)
         } else {
-            val browser = JBCefBrowser()
-            Disposer.register(this, browser)
+            // JBCefClient 의 JS_QUERY_POOL_SIZE 는 브라우저 생성 *전* 에 설정해야 한다.
+            // 기본값은 BridgeInjector 의 jsQuery 1개로 다 쓰여서, 그 후의 동적
+            // JBCefJSQuery.create (Export snapshot 호출용) 가 IllegalStateException 으로
+            // 실패해왔다. 16 슬롯이면 충분 (snapshot 호출은 1회당 슬롯 1개, 잠깐 점유 후 dispose).
+            val client = JBCefApp.getInstance().createClient().apply {
+                setProperty(JBCefClient.Properties.JS_QUERY_POOL_SIZE, 16)
+            }
+            Disposer.register(this, client)
+            val browser = JBCefBrowserBuilder().setClient(client).build()
+            Disposer.register(client, browser)
+
+            // 외부(Export 등) 가 viewer JS 를 호출할 수 있도록 핸들 등록. 패널 dispose 시 클리어.
+            project.service<Jpa3dBrowserHolder>().browser = browser
+            Disposer.register(this, Disposable {
+                if (project.service<Jpa3dBrowserHolder>().browser === browser) {
+                    project.service<Jpa3dBrowserHolder>().browser = null
+                }
+            })
 
             val jsQuery = JBCefJSQuery.create(browser as JBCefBrowserBase)
             Disposer.register(this, jsQuery)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ELK, { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk.bundled.js";
 import { GraphData, GraphLink, GraphNode, Relation } from "./types";
 
@@ -122,10 +122,20 @@ interface NodeDrag {
 
 const CLICK_THRESHOLD_PX = 4;
 
-export default function ErdView2D({
+/**
+ * 외부(plugin) 가 호출하는 명령형 인터페이스.
+ * Snapshot 은 현재 `<svg>` 엘리먼트를 그대로 시리얼라이즈하거나, canvas 로 그려 PNG 로 변환한다.
+ */
+export interface Erd2dHandle {
+  snapshotSvg(): string;
+  snapshotPng(): Promise<string>;
+}
+
+const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
   data, width, height, level, onNodeReseed, onNodeNavigate,
   highlightedIds, highlightBaseId
-}: Props) {
+}, ref) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const hlActive = !!highlightedIds && highlightedIds.size > 0;
   const isHighlighted = (id: string): boolean =>
     !!highlightedIds && (highlightedIds.has(id) || id === highlightBaseId);
@@ -143,6 +153,54 @@ export default function ErdView2D({
   // 진행 중인 노드 드래그 — render 영향이 없으니 ref 로 잡음
   const nodeDragRef = useRef<NodeDrag | null>(null);
   const layoutSeq = useRef(0);
+
+  // === Snapshot 출력 ===
+  // 외부(plugin) 가 호출. SVG 는 그대로 직렬화, PNG 는 SVG 를 임시 <img> → canvas 로 그려 dataURL 생성.
+  useImperativeHandle(ref, () => ({
+    snapshotSvg: () => {
+      const node = svgRef.current;
+      if (!node) return "";
+      const clone = node.cloneNode(true) as SVGSVGElement;
+      if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      // 배경색을 명시 — viewer 의 어두운 배경이 그대로 캡처되도록.
+      const bg = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+      bg.setAttribute("width", String(width));
+      bg.setAttribute("height", String(height));
+      bg.setAttribute("fill", "#0f172a");
+      clone.insertBefore(bg, clone.firstChild);
+      return new XMLSerializer().serializeToString(clone);
+    },
+    snapshotPng: async () => {
+      const svgString = (function () {
+        const node = svgRef.current;
+        if (!node) return "";
+        const clone = node.cloneNode(true) as SVGSVGElement;
+        if (!clone.getAttribute("xmlns")) clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        return new XMLSerializer().serializeToString(clone);
+      })();
+      if (!svgString) return "";
+      const blob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      try {
+        const img = new Image();
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error("SVG → image load failed"));
+          img.src = url;
+        });
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d")!;
+        ctx.fillStyle = "#0f172a";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0);
+        return canvas.toDataURL("image/png");
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+  }), [width, height]);
 
   // 레이아웃 방향이 바뀌면(LR↔TB) 좌표계가 회전되니 offset 도 초기화.
   // 데이터 변경(엔티티 추가/삭제) 만으로는 offset 유지.
@@ -227,7 +285,7 @@ export default function ErdView2D({
         setZoom(next);
       }}
     >
-      <svg width={width} height={height}>
+      <svg ref={svgRef} width={width} height={height} xmlns="http://www.w3.org/2000/svg">
         <defs>
           {/* EXTENDS / USES_ENTITY 용 화살촉 — 카디널리티가 없는 관계 */}
           {Object.entries(RELATION_COLOR).map(([rel, color]) => (
@@ -439,7 +497,9 @@ export default function ErdView2D({
       </div>
     </div>
   );
-}
+});
+
+export default ErdView2D;
 
 function pointsToPath(points: { x: number; y: number }[]): string {
   if (points.length === 0) return "";

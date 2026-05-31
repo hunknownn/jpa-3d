@@ -86,14 +86,14 @@ class Jpa3dAnalyzer(private val project: Project) {
         val rawLinks = mutableListOf<GraphLink>()
 
         for ((fqn, rec) in entityClasses) {
-            val (columns, relations) = extractFieldsAndRelations(rec.uClass, entityClasses.keys)
-            nodes.add(toEntityNode(rec, columns))
+            val extraction = extractFieldsAndRelations(rec.uClass, entityClasses.keys)
+            nodes.add(toEntityNode(rec, extraction.columns, extraction.constraints))
             rec.uClass.javaPsi.superClass?.qualifiedName?.let { superFqn ->
                 if (entityClasses.containsKey(superFqn)) {
                     rawLinks.add(GraphLink(fqn, superFqn, Relation.EXTENDS, 1, null))
                 }
             }
-            rawLinks.addAll(relations)
+            rawLinks.addAll(extraction.relations)
         }
 
         for ((fqn, rec) in repositoryClasses) {
@@ -191,20 +191,25 @@ class Jpa3dAnalyzer(private val project: Project) {
 
     private data class FieldExtraction(
         val columns: List<ColumnInfo>,
-        val relations: List<GraphLink>
+        val relations: List<GraphLink>,
+        val constraints: RawTableConstraints
     )
 
     private fun extractFieldsAndRelations(
         c: UClass,
         knownEntityFqns: Set<String>
     ): FieldExtraction {
-        val owner = c.qualifiedName ?: return FieldExtraction(emptyList(), emptyList())
+        val constraints = extractTableConstraints(c)
+        val owner = c.qualifiedName ?: return FieldExtraction(emptyList(), emptyList(), constraints)
         val columns = mutableListOf<ColumnInfo>()
         val relations = mutableListOf<GraphLink>()
 
-        // 클래스 레벨 @Table 의 indexes / uniqueConstraints 를 미리 모아둬서 buildColumn 에서 참조.
-        // 매칭은 db 컬럼명 lowercase 기준.
-        val (indexedCols, uniqueCols) = extractTableConstraints(c)
+        // 클래스 레벨 @Table 의 indexes / uniqueConstraints 의 단일 컬럼 그룹만 lowercase set 으로 변환 —
+        // 그룹에는 원본 케이스로 저장돼 있어 buildColumn 매칭 시점에 정규화.
+        val indexedCols = constraints.singleColumnIndexes()
+        val uniqueCols = constraints.singleColumnUniques()
+        // @SequenceGenerator 모음 — buildColumn 에서 generator name 매칭에 사용.
+        val sequenceGenerators = collectSequenceGenerators(c)
 
         for (f in c.fields) {
             // static (= Java static / Kotlin companion 등) 은 컬럼 아님
@@ -223,9 +228,9 @@ class Jpa3dAnalyzer(private val project: Project) {
                 }
                 continue
             }
-            columns.add(buildColumn(f, indexedCols, uniqueCols))
+            columns.add(buildColumn(f, indexedCols, uniqueCols, sequenceGenerators))
         }
-        return FieldExtraction(columns, relations)
+        return FieldExtraction(columns, relations, constraints)
     }
 
     /**
@@ -269,32 +274,71 @@ class Jpa3dAnalyzer(private val project: Project) {
     }
 
     /**
-     * @Table 의 indexes / uniqueConstraints 에서 컬럼명 집합을 추출.
+     * @Table 의 indexes / uniqueConstraints 에서 컬럼 그룹을 보존한 형태로 추출.
      *
-     * UAnnotation 의 nested 배열 어노테이션 접근은 PSI 가 더 직접적이라 PSI 로 내려가서 읽는다.
+     *  - indexes: `@Index(columnList="email" | "a, b, c desc")` → [["email"], ["a","b","c"]]
+     *  - uniqueConstraints: `@UniqueConstraint(columnNames={"email"})` 또는 `{"a","b"}` 의 배열
      *
-     * indexes: `@Index(columnList="email" | "a, b, c desc")` — 쉼표 분리, ASC/DESC 토큰 제거.
-     * uniqueConstraints: `@UniqueConstraint(columnNames={"email"})` — 문자열 배열.
-     *
-     * @return (indexedColumns, uniqueColumns) — 모두 lowercase 컬럼명 set
+     * 단일 컬럼 그룹은 ColumnInfo.indexed/unique 플래그로도 표시 (column-level 표기용),
+     * 다중 컬럼 그룹은 EntityInfo.compositeIndexes/compositeUniques 로 별도 보존.
      */
-    private fun extractTableConstraints(c: UClass): Pair<Set<String>, Set<String>> {
-        val tableAnn = c.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.TABLE }
-        val psi = tableAnn?.javaPsi as? PsiAnnotation ?: return Pair(emptySet(), emptySet())
+    private data class RawTableConstraints(
+        val indexes: List<List<String>>,
+        val uniqueConstraints: List<List<String>>
+    ) {
+        /** 단일 컬럼 인덱스 그룹의 컬럼명만 lowercase set 으로 — column-level 플래그 매칭용. */
+        fun singleColumnIndexes(): Set<String> =
+            indexes.filter { it.size == 1 }.mapTo(mutableSetOf()) { it[0].lowercase() }
+        fun singleColumnUniques(): Set<String> =
+            uniqueConstraints.filter { it.size == 1 }.mapTo(mutableSetOf()) { it[0].lowercase() }
+        /** 다중 컬럼 그룹만 — EntityInfo composite 필드용. 원본 케이스 그대로. */
+        fun compositeIndexes(): List<List<String>> = indexes.filter { it.size > 1 }
+        fun compositeUniques(): List<List<String>> = uniqueConstraints.filter { it.size > 1 }
+    }
 
-        val indexed = mutableSetOf<String>()
-        val unique = mutableSetOf<String>()
+    private fun extractTableConstraints(c: UClass): RawTableConstraints {
+        val tableAnn = c.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.TABLE }
+        val psi = tableAnn?.javaPsi as? PsiAnnotation ?: return RawTableConstraints(emptyList(), emptyList())
+
+        val indexes = mutableListOf<List<String>>()
+        val uniques = mutableListOf<List<String>>()
 
         forEachNestedAnnotation(psi.findAttributeValue("indexes")) { ann ->
-            val colList = (ann.findAttributeValue("columnList") as? PsiLiteralExpression)?.value as? String ?: return@forEachNestedAnnotation
-            for (col in parseColumnList(colList)) indexed.add(col)
+            val colList = (ann.findAttributeValue("columnList") as? PsiLiteralExpression)?.value as? String
+                ?: return@forEachNestedAnnotation
+            val cols = parseColumnList(colList)
+            if (cols.isNotEmpty()) indexes.add(cols)
         }
 
         forEachNestedAnnotation(psi.findAttributeValue("uniqueConstraints")) { ann ->
-            collectStringArray(ann.findAttributeValue("columnNames"), unique)
+            val cols = mutableListOf<String>()
+            collectStringList(ann.findAttributeValue("columnNames"), cols)
+            if (cols.isNotEmpty()) uniques.add(cols)
         }
 
-        return Pair(indexed, unique)
+        return RawTableConstraints(indexes, uniques)
+    }
+
+    /**
+     * 클래스 / 필드 레벨 `@SequenceGenerator` 를 모아 (generator name → sequenceName) 맵을 만든다.
+     * generator name 이 비어있으면 sequenceName 자체를 키로 사용.
+     */
+    private fun collectSequenceGenerators(c: UClass): Map<String, String> {
+        val map = mutableMapOf<String, String>()
+        fun consume(ann: UAnnotation) {
+            val name = ann.stringAttr("name") ?: return
+            val seq = ann.stringAttr("sequenceName") ?: name
+            map[name] = seq
+        }
+        for (ann in c.uAnnotations) {
+            if (ann.qualifiedName in JpaAnnotations.SEQUENCE_GENERATOR) consume(ann)
+        }
+        for (f in c.fields) {
+            for (ann in f.uAnnotations) {
+                if (ann.qualifiedName in JpaAnnotations.SEQUENCE_GENERATOR) consume(ann)
+            }
+        }
+        return map
     }
 
     /** 배열 또는 단일 어노테이션 어느 쪽이든 element 어노테이션을 순회. */
@@ -306,24 +350,33 @@ class Jpa3dAnalyzer(private val project: Project) {
         }
     }
 
-    /** 배열 또는 단일 문자열을 lowercase 로 [out] 에 추가. */
-    private fun collectStringArray(value: PsiAnnotationMemberValue?, out: MutableSet<String>) {
+    /**
+     * 배열 또는 단일 문자열을 원본 케이스 그대로 순서 유지하며 [out] 에 추가.
+     * 케이스 정규화는 비교 시점(buildColumn)에서만 수행 — 그래야 복합 그룹의 원본 케이스가 보존되어
+     * DDL 의 snake_case 변환이 컬럼명과 일관되게 적용됨.
+     */
+    private fun collectStringList(value: PsiAnnotationMemberValue?, out: MutableList<String>) {
         when (value) {
             is PsiArrayInitializerMemberValue -> value.initializers.forEach {
-                ((it as? PsiLiteralExpression)?.value as? String)?.let { s -> out.add(s.lowercase()) }
+                ((it as? PsiLiteralExpression)?.value as? String)?.let { s -> out.add(s) }
             }
-            is PsiLiteralExpression -> (value.value as? String)?.let { out.add(it.lowercase()) }
+            is PsiLiteralExpression -> (value.value as? String)?.let { out.add(it) }
             else -> Unit
         }
     }
 
-    /** `"a, b DESC, c"` → ["a", "b", "c"] (lowercase). */
+    /** `"a, b DESC, c"` → ["a", "b", "c"] — 원본 케이스 보존. */
     private fun parseColumnList(s: String): List<String> =
         s.split(",")
-            .map { it.trim().substringBefore(' ').lowercase() }
+            .map { it.trim().substringBefore(' ') }
             .filter { it.isNotEmpty() }
 
-    private fun buildColumn(f: UField, indexedCols: Set<String>, uniqueCols: Set<String>): ColumnInfo {
+    private fun buildColumn(
+        f: UField,
+        indexedCols: Set<String>,
+        uniqueCols: Set<String>,
+        sequenceGenerators: Map<String, String>
+    ): ColumnInfo {
         val annotations = f.uAnnotations
         val isPk = annotations.any { it.qualifiedName in JpaAnnotations.ID }
         val columnAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.COLUMN }
@@ -333,9 +386,19 @@ class Jpa3dAnalyzer(private val project: Project) {
         val nullable = columnAnn?.boolAttr("nullable") ?: true
         val columnUnique = columnAnn?.boolAttr("unique") ?: false
         val length = columnAnn?.intAttr("length")
+        val precision = columnAnn?.intAttr("precision")
+        val scale = columnAnn?.intAttr("scale")
+        val isLob = annotations.any { it.qualifiedName in JpaAnnotations.LOB }
 
         // GeneratedValue.strategy 는 enum reference — UReferenceExpression 의 resolvedName 사용
         val strategy = generatedAnn?.findAttributeValue("strategy")?.let { extractEnumName(it) }
+
+        // SEQUENCE 전략일 때 generator 이름으로 @SequenceGenerator 룩업. 없으면 Hibernate 기본 이름.
+        val sequenceName: String? = if (strategy?.uppercase() == "SEQUENCE") {
+            val generatorName = generatedAnn?.stringAttr("generator")
+            if (!generatorName.isNullOrBlank()) sequenceGenerators[generatorName] ?: generatorName
+            else "hibernate_sequence"
+        } else null
 
         val dbName = (columnName ?: f.name).lowercase()
         val tableUnique = dbName in uniqueCols
@@ -350,7 +413,11 @@ class Jpa3dAnalyzer(private val project: Project) {
             unique = columnUnique || tableUnique,
             indexed = indexed,
             length = length,
-            generatedValue = strategy
+            generatedValue = strategy,
+            precision = precision,
+            scale = scale,
+            lob = isLob,
+            sequenceName = sequenceName
         )
     }
 
@@ -425,23 +492,28 @@ class Jpa3dAnalyzer(private val project: Project) {
 
     // === 노드 변환 ===
 
-    private fun toEntityNode(rec: EntityRecord, columns: List<ColumnInfo>): GraphNode {
+    private fun toEntityNode(
+        rec: EntityRecord,
+        columns: List<ColumnInfo>,
+        constraints: RawTableConstraints
+    ): GraphNode {
         val u = rec.uClass
         val psi = u.javaPsi
         val tableName = u.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.TABLE }
             ?.stringAttr("name")
-        val pkg = packageOf(psi)
         return GraphNode(
             id = u.qualifiedName ?: u.name ?: "",
             name = u.name ?: psi.name ?: "",
-            pkg = pkg,
+            pkg = packageOf(psi),
             kind = if (psi.isInterface) "interface" else "class",
             stereotypes = emptyList(),
             entity = EntityInfo(
                 kind = rec.kind.jsonValue,
                 tableName = tableName,
                 columns = columns,
-                inheritance = extractInheritance(u)
+                inheritance = extractInheritance(u),
+                compositeIndexes = constraints.compositeIndexes(),
+                compositeUniques = constraints.compositeUniques()
             )
         )
     }

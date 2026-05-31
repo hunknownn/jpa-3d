@@ -41,7 +41,19 @@ data class ColumnInfo(
     /** FK 가 참조하는 entity FQN. foreignKey=true 일 때만. */
     val fkTarget: String? = null,
     val length: Int?,
-    val generatedValue: String?
+    val generatedValue: String?,
+    /** `@Column(precision=N)` — 주로 BigDecimal 에서 의미. */
+    val precision: Int? = null,
+    /** `@Column(scale=N)` — 주로 BigDecimal 에서 의미. */
+    val scale: Int? = null,
+    /** `@Lob` 어노테이션 유무. CLOB/BLOB 매핑에 사용. */
+    val lob: Boolean = false,
+    /**
+     * `@GeneratedValue(strategy=SEQUENCE, generator="X")` + `@SequenceGenerator(name="X", sequenceName="Y")`
+     * 에서 추출한 시퀀스 객체의 실제 이름. strategy=SEQUENCE 인데 generator 가 비어있으면 Hibernate 기본
+     * "hibernate_sequence".
+     */
+    val sequenceName: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -60,7 +72,11 @@ data class EntityInfo(
     val tableName: String?,
     val columns: List<ColumnInfo>,
     /** @Inheritance 가 붙은 상속 베이스 또는 그 자식. 아니면 null. */
-    val inheritance: InheritanceInfo? = null
+    val inheritance: InheritanceInfo? = null,
+    /** `@Table(indexes=...)` 의 복합 인덱스 (size > 1 만). 단일 컬럼은 [ColumnInfo.indexed] 로. */
+    val compositeIndexes: List<List<String>> = emptyList(),
+    /** `@Table(uniqueConstraints=...)` 의 복합 유니크 (size > 1 만). 단일은 [ColumnInfo.unique] 로. */
+    val compositeUniques: List<List<String>> = emptyList()
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
