@@ -26,6 +26,17 @@ dependencies {
     // 명시 의존을 두는 편이 안전 (Platform 의 클래스 가시성이 버전마다 변동).
     implementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.17.2")
 
+    // JUnit 5 — Platform 의존 없는 순수 단위 테스트용 (DdlExporter, ExportConverter 등).
+    testImplementation(kotlin("test-junit5"))
+    testImplementation(platform("org.junit:junit-bom:5.10.2"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    // Vintage engine — JUnit 3/4 호환. BasePlatformTestCase 계열(LightJavaCodeInsightFixtureTestCase)이
+    // JUnit 3 TestCase 를 상속하므로 vintage 가 있어야 실행됨.
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine")
+    // JUnit 4 — BasePlatformTestCase 의 supertype junit.framework.TestCase 가 여기 들어있음 (컴파일 의존).
+    testImplementation("junit:junit:4.13.2")
+
     intellijPlatform {
         // IntelliJ IDEA Community 2024.2 를 타겟. 추후 Ultimate JPA 모듈 의존이 필요해지면 IU 로 전환.
         intellijIdeaCommunity("2024.2")
@@ -38,7 +49,15 @@ dependencies {
         // instrumentCode task 가 NotNull 등 어노테이션 인식을 위해 필요
         instrumentationTools()
 
+        // Analyzer 테스트는 LightJavaCodeInsightFixtureTestCase 를 상속해 PSI/UAST 픽스처가 필요.
+        // 이 프레임워크가 JUnit5TestSessionListener 를 자동 등록하는데, 그게 JUnit5 launcher 부트스트랩
+        // 시 instantiate 실패해 모든 테스트가 깨졌었음.
+        // → tasks.test 에 `idea.test.junit5.disabled=true` 시스템 프로퍼티로 listener 비활성.
+        // (DdlExporterTest 같은 순수 JUnit5 테스트는 platform setup 불필요, vintage 로 도는 PSI 테스트는
+        //  자체 setUp 에서 IdeaTestApplication 을 초기화하므로 둘 다 정상.)
         testFramework(TestFrameworkType.Platform)
+        // LightJavaCodeInsightFixtureTestCase 는 Java 플러그인 측 테스트 프레임워크에 들어있음.
+        testFramework(TestFrameworkType.Plugin.Java)
     }
 }
 
@@ -111,4 +130,10 @@ sourceSets {
 
 tasks.named("processResources") {
     dependsOn(copyViewer)
+}
+
+tasks.test {
+    useJUnitPlatform()
+    // Platform testFramework 가 등록하는 JUnit5TestSessionListener 비활성 — 위 코멘트 참조.
+    systemProperty("idea.test.junit5.disabled", "true")
 }
