@@ -1,7 +1,12 @@
 package com.jpa3d.analyzer
 
 import com.intellij.testFramework.fixtures.LightJavaCodeInsightFixtureTestCase
+import com.jpa3d.export.DdlDialect
+import com.jpa3d.export.DdlExporter
+import com.jpa3d.export.ExportConverter
+import com.jpa3d.export.ExportScope
 import com.jpa3d.model.ColumnInfo
+import com.jpa3d.model.Relation
 
 /**
  * Kotlin 엔티티의 언어 특성이 DDL 모델에 올바르게 반영되는지 검증한다.
@@ -24,6 +29,13 @@ class KotlinSupportTest : LightJavaCodeInsightFixtureTestCase() {
         Jpa3dAnalyzer(project).analyze().nodes
             .firstOrNull { it.id == fqn }?.entity?.columns
             ?: throw AssertionError("entity '$fqn' not found")
+
+    private fun ddl(): String {
+        val graph = Jpa3dAnalyzer(project).analyze()
+        val model = ExportConverter.toExportModel(graph, ExportScope.ALL, seed = "", depth = 0)
+        return DdlExporter(DdlDialect.POSTGRES, snakeCase = true).render(model)
+            .replace("\"", "").replace("`", "")
+    }
 
     private fun List<ColumnInfo>.byName(name: String): ColumnInfo =
         firstOrNull { it.columnName == name }
@@ -117,5 +129,159 @@ class KotlinSupportTest : LightJavaCodeInsightFixtureTestCase() {
             "user_name", cols.byName("user_name").columnName)
         assertFalse("주생성자 non-null String 은 NOT NULL 이어야", cols.byName("user_name").nullable)
         assertTrue("주생성자 nullable String? 은 nullable 이어야", cols.byName("nickname").nullable)
+    }
+
+    // ===================================================================================
+    // enum class — Kotlin enum 도 isEnum 으로 풀려 ORDINAL/STRING 매핑이 돼야 함
+    // ===================================================================================
+
+    fun testKotlinEnumClassMapping() {
+        myFixture.addFileToProject(
+            "Status.kt",
+            "package com.example\nenum class Status { ACTIVE, INACTIVE }"
+        )
+        myFixture.addFileToProject(
+            "Task.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            @Entity
+            class Task(
+                @Id val id: Long = 0,
+                @Enumerated(EnumType.STRING) val status: Status = Status.ACTIVE,
+                val priority: Status = Status.ACTIVE,
+            )
+            """.trimIndent()
+        )
+        val cols = analyzeColumns("com.example.Task")
+        assertEquals("@Enumerated(STRING) 미반영", "STRING", cols.byName("status").enumType)
+        // @Enumerated 없는 enum 필드 → JPA 기본 ORDINAL. Kotlin enum class 도 isEnum 으로 잡혀야.
+        assertEquals("bare Kotlin enum 은 ORDINAL 기본이어야", "ORDINAL", cols.byName("priority").enumType)
+    }
+
+    // ===================================================================================
+    // @Embeddable data class — @Embedded 가 호스트 테이블에 펼쳐져야 함
+    // ===================================================================================
+
+    fun testKotlinEmbeddableDataClassFlattens() {
+        myFixture.addFileToProject(
+            "Address.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            @Embeddable
+            data class Address(
+                val street: String = "",
+                val city: String = "",
+            )
+            """.trimIndent()
+        )
+        myFixture.addFileToProject(
+            "Company.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            @Entity
+            class Company(
+                @Id val id: Long = 0,
+                @Embedded val address: Address = Address(),
+            )
+            """.trimIndent()
+        )
+        val cols = analyzeColumns("com.example.Company")
+        assertNotNull("street 펼침 안 됨 (got ${cols.map { it.columnName }})",
+            cols.firstOrNull { it.columnName == "street" })
+        assertNotNull("city 펼침 안 됨 (got ${cols.map { it.columnName }})",
+            cols.firstOrNull { it.columnName == "city" })
+        assertNull("@Embedded 가 단일 컬럼으로 잘못 떨어짐", cols.firstOrNull { it.columnName == "address" })
+        // data class 합성 멤버(componentN/copy)가 컬럼으로 새지 않아야.
+        assertNull("data class 합성 멤버가 컬럼으로 샘", cols.firstOrNull { it.columnName?.startsWith("component") == true })
+    }
+
+    // ===================================================================================
+    // MutableList 관계 — Kotlin 컬렉션 타입의 @OneToMany 관계가 인식돼야 함
+    // ===================================================================================
+
+    fun testKotlinMutableListRelation() {
+        myFixture.addFileToProject(
+            "Course.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            @Entity
+            class Course(@Id val id: Long = 0)
+            """.trimIndent()
+        )
+        myFixture.addFileToProject(
+            "Member.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            @Entity
+            class Member(
+                @Id val id: Long = 0,
+                @OneToMany val courses: MutableList<Course> = mutableListOf(),
+            )
+            """.trimIndent()
+        )
+        val links = Jpa3dAnalyzer(project).analyze().links
+        val link = links.firstOrNull { it.source == "com.example.Member" && it.target == "com.example.Course" }
+        assertNotNull("MutableList<Course> @OneToMany 관계 누락 (got ${links.map { "${it.source}->${it.target}" }})", link)
+        assertEquals("관계 종류 오인식", Relation.ONE_TO_MANY, link!!.relation)
+    }
+
+    // ===================================================================================
+    // is-prefix Boolean — 필드 접근 기준 컬럼명. isActive → is_active (active 가 아님).
+    // ===================================================================================
+
+    fun testKotlinBooleanIsPrefixColumnName() {
+        myFixture.addFileToProject(
+            "Account.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            @Entity
+            class Account(
+                @Id val id: Long = 0,
+                val isActive: Boolean = false,
+            )
+            """.trimIndent()
+        )
+        // 모델 레벨: 필드명 그대로 isActive (getter 기반 active 로 깎이면 안 됨).
+        val cols = analyzeColumns("com.example.Account")
+        assertNotNull("isActive 컬럼 누락 (got ${cols.map { it.columnName }})",
+            cols.firstOrNull { it.columnName == "isActive" })
+        // DDL(snake_case): is_active 여야 함.
+        val sql = ddl()
+        assertTrue("is_active 컬럼이 나와야 (필드 접근 기준):\n$sql", sql.contains("is_active"))
+    }
+
+    // ===================================================================================
+    // java.time.Instant — 타임존 인식 타임스탬프로 매핑돼야 함 (Postgres 기준)
+    // ===================================================================================
+
+    fun testKotlinInstantColumnType() {
+        // 테스트 mockJDK 에는 java.time 이 없어 미해결되므로 스텁 주입 (실제 프로젝트엔 항상 존재).
+        myFixture.addClass("package java.time; public final class Instant { }")
+        myFixture.addFileToProject(
+            "Event.kt",
+            """
+            package com.example
+            import jakarta.persistence.*
+            import java.time.Instant
+            @Entity
+            class Event(
+                @Id val id: Long = 0,
+                val createdAt: Instant? = null,
+            )
+            """.trimIndent()
+        )
+        // 모델: javaType 이 java.time.Instant 로 풀려야 sqlType 이 매핑됨.
+        val col = analyzeColumns("com.example.Event").byName("createdAt")
+        assertEquals("Instant 의 javaType 미해결", "java.time.Instant", col.javaType)
+        // DDL(Postgres): TIMESTAMP(6) WITH TIME ZONE.
+        val line = ddl().lines().map { it.trim().removeSuffix(",") }.first { it.startsWith("created_at ") }
+        assertTrue("Instant 가 타임존 타임스탬프로 안 나옴: $line",
+            line.contains("TIMESTAMP(6) WITH TIME ZONE"))
     }
 }
