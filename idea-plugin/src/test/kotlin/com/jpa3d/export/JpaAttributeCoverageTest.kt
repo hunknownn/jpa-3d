@@ -301,6 +301,81 @@ class JpaAttributeCoverageTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue("경고 주석 누락:\n$sql", sql.contains("columnDefinition is DB-specific"))
     }
 
+    // ===================================================================================
+    // nullability 추론 — primitive / @NotNull(Kotlin non-null) → NOT NULL
+    // ===================================================================================
+
+    fun testPrimitiveFieldIsNotNull() {
+        // JVM primitive (Java int, Kotlin non-null Int) 은 본질적으로 non-null → NOT NULL.
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity public class Counter {
+                @Id Long id;
+                int count;
+            }
+            """.trimIndent()
+        )
+        val line = column(ddl(), "count")
+        assertNotNull("count 컬럼 없음", line)
+        assertTrue("primitive int 는 NOT NULL 이어야: $line", line!!.contains("NOT NULL"))
+    }
+
+    fun testBoxedReferenceFieldStaysNullable() {
+        // 박싱 타입(Integer) / 어노테이션 없는 참조 타입은 nullable 유지.
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity public class Counter {
+                @Id Long id;
+                Integer count;
+            }
+            """.trimIndent()
+        )
+        val line = column(ddl(), "count")
+        assertNotNull("count 컬럼 없음", line)
+        assertFalse("박싱 Integer 는 nullable 이어야: $line", line!!.contains("NOT NULL"))
+    }
+
+    fun testNotNullAnnotatedFieldIsNotNull() {
+        // Kotlin non-null 참조 타입(`String`) 은 light class 가 타입/필드에 @NotNull 을 부여한다.
+        // Java 에서 동일 어노테이션을 붙여 그 경로를 검증.
+        myFixture.addClass("package org.jetbrains.annotations; public @interface NotNull { }")
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            import org.jetbrains.annotations.NotNull;
+            @Entity public class Member {
+                @Id Long id;
+                @NotNull String name;
+            }
+            """.trimIndent()
+        )
+        val line = column(ddl(), "name")
+        assertNotNull("name 컬럼 없음", line)
+        assertTrue("@NotNull(Kotlin non-null) 참조 타입은 NOT NULL 이어야: $line", line!!.contains("NOT NULL"))
+    }
+
+    fun testExplicitColumnNullableOverridesTypeInference() {
+        // primitive 라도 @Column(nullable=true) 가 명시되면 그 값이 우선.
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity public class Counter {
+                @Id Long id;
+                @Column(nullable = true) int count;
+            }
+            """.trimIndent()
+        )
+        val line = column(ddl(), "count")
+        assertNotNull("count 컬럼 없음", line)
+        assertFalse("명시적 nullable=true 가 우선이어야: $line", line!!.contains("NOT NULL"))
+    }
+
     private fun addEnum() {
         myFixture.addClass("package com.example; public enum Status { ACTIVE, INACTIVE, PENDING }")
     }

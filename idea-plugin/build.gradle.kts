@@ -44,6 +44,9 @@ dependencies {
         // Java PSI (PsiClass, PsiAnnotation 등) 를 위해 bundled Java plugin 필요.
         // ToolWindow / JCEF 는 platform core 에 있어 추가 의존 불필요.
         bundledPlugin("com.intellij.java")
+        // Kotlin 엔티티 분석/테스트 — UAST 가 Kotlin 을 파싱하려면 번들 Kotlin 플러그인이 필요.
+        // (Kotlin non-null 타입, 주생성자 프로퍼티 등 언어 특성 검증의 전제.)
+        bundledPlugin("org.jetbrains.kotlin")
         plugins()
 
         // instrumentCode task 가 NotNull 등 어노테이션 인식을 위해 필요

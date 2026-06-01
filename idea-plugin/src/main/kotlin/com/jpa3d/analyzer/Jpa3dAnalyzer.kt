@@ -8,6 +8,7 @@ import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
 import com.intellij.psi.PsiField
 import com.intellij.psi.PsiModifier
+import com.intellij.psi.PsiPrimitiveType
 import com.intellij.psi.PsiAnnotation
 import com.intellij.psi.PsiAnnotationMemberValue
 import com.intellij.psi.PsiArrayInitializerMemberValue
@@ -203,6 +204,24 @@ class Jpa3dAnalyzer(private val project: Project) {
         val constraints: RawTableConstraints
     )
 
+    /**
+     * Kotlin 주생성자 프로퍼티(`class X(@Id val id: Long)`)는 use-site target 미지정 시 JPA 어노테이션이
+     * backing field 가 아니라 **주생성자 파라미터** 에 실린다. `UClass.fields` 만 보면 통째로 놓치므로
+     * 파라미터명 → 어노테이션 매핑을 만들어 field 어노테이션과 병합한다.
+     * (Java / 일반 Kotlin 바디 필드는 어노테이션 있는 생성자 파라미터가 없어 빈 맵 → 무영향.)
+     */
+    private fun constructorParamAnnotations(c: UClass): Map<String, List<UAnnotation>> =
+        c.methods.asSequence()
+            .filter { it.isConstructor }
+            .flatMap { it.uastParameters.asSequence() }
+            .filter { it.uAnnotations.isNotEmpty() }
+            .groupBy({ it.name }, { it.uAnnotations })
+            .mapValues { (_, lists) -> lists.flatten() }
+
+    /** field 자체 어노테이션 + (Kotlin 주생성자 프로퍼티면) 매칭 파라미터 어노테이션. */
+    private fun UField.effectiveAnnotations(paramAnns: Map<String, List<UAnnotation>>): List<UAnnotation> =
+        uAnnotations + paramAnns[name].orEmpty()
+
     private fun extractFieldsAndRelations(
         c: UClass,
         knownEntityFqns: Set<String>
@@ -219,37 +238,40 @@ class Jpa3dAnalyzer(private val project: Project) {
         // @SequenceGenerator 모음 — buildColumn 에서 generator name 매칭에 사용.
         val sequenceGenerators = collectSequenceGenerators(c)
 
+        // Kotlin 주생성자 프로퍼티의 어노테이션은 파라미터에 실리므로 미리 모아 field 와 병합한다.
+        val paramAnns = constructorParamAnnotations(c)
         for (f in c.fields) {
             // static (= Java static / Kotlin companion 등) 은 컬럼 아님
             val psiField = f.javaPsi as? PsiField
             if (psiField?.hasModifierProperty(PsiModifier.STATIC) == true) continue
-            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) continue
+            val anns = f.effectiveAnnotations(paramAnns)
+            if (anns.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) continue
             // @ElementCollection 은 별도 컬렉션 테이블로 매핑됨 — 호스트 테이블 컬럼이 아니므로 스킵.
             // (컬렉션 테이블 자체는 아직 미모델링. 최소한 잘못된 VARCHAR 컬럼이 생기지 않게.)
-            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.ELEMENT_COLLECTION }) continue
+            if (anns.any { it.qualifiedName in JpaAnnotations.ELEMENT_COLLECTION }) continue
             // @EmbeddedId — @Embeddable PK 클래스의 필드들을 복합 PK 컬럼으로 펼침.
-            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.EMBEDDED_ID }) {
+            if (anns.any { it.qualifiedName in JpaAnnotations.EMBEDDED_ID }) {
                 columns.addAll(expandEmbedded(f, indexedCols, uniqueCols, sequenceGenerators, asPrimaryKey = true))
                 continue
             }
             // @Embedded — @Embeddable 의 필드들을 호스트 테이블에 인라인으로 펼침.
-            if (f.uAnnotations.any { it.qualifiedName in JpaAnnotations.EMBEDDED }) {
+            if (anns.any { it.qualifiedName in JpaAnnotations.EMBEDDED }) {
                 columns.addAll(expandEmbedded(f, indexedCols, uniqueCols, sequenceGenerators))
                 continue
             }
 
-            val relAnnotation = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.RELATION_ANNOTATIONS }
+            val relAnnotation = anns.firstOrNull { it.qualifiedName in JpaAnnotations.RELATION_ANNOTATIONS }
             if (relAnnotation != null) {
-                val link = buildRelationLink(owner, f, relAnnotation, knownEntityFqns)
+                val link = buildRelationLink(owner, f, anns, relAnnotation, knownEntityFqns)
                 if (link != null) {
                     relations.add(link)
                     // owning side ManyToOne/OneToOne 은 실제 DB 에 FK 컬럼이 생기므로 표 표기용
                     // ColumnInfo 도 함께 emit. (OneToMany mappedBy / ManyToMany join table 은 제외)
-                    buildFkColumn(f, relAnnotation, link)?.let { columns.add(it) }
+                    buildFkColumn(f, anns, relAnnotation, link)?.let { columns.add(it) }
                 }
                 continue
             }
-            columns.add(buildColumn(f, indexedCols, uniqueCols, sequenceGenerators))
+            columns.add(buildColumn(f, anns, indexedCols, uniqueCols, sequenceGenerators))
         }
         return FieldExtraction(columns, relations, constraints)
     }
@@ -264,7 +286,7 @@ class Jpa3dAnalyzer(private val project: Project) {
      * 컬럼명: `@JoinColumn(name=...)` 명시값 → 없으면 JPA 기본 `fieldName + "_id"`.
      * nullable / unique 는 @JoinColumn 속성 그대로.
      */
-    private fun buildFkColumn(f: UField, relAnn: UAnnotation, link: GraphLink): ColumnInfo? {
+    private fun buildFkColumn(f: UField, annotations: List<UAnnotation>, relAnn: UAnnotation, link: GraphLink): ColumnInfo? {
         val qn = relAnn.qualifiedName
         val owningRelation = when {
             qn in JpaAnnotations.MANY_TO_ONE -> true
@@ -273,11 +295,12 @@ class Jpa3dAnalyzer(private val project: Project) {
         }
         if (!owningRelation) return null
 
-        val joinCol = f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_COLUMN }
+        val joinCol = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_COLUMN }
         // @JoinColumn(name="") (name 미지정) 도 빈 문자열 → null 정규화 후 JPA 기본 `필드명_id`.
         val explicitName = joinCol?.stringAttr("name")?.takeIf { it.isNotBlank() }
         val fkName = explicitName ?: "${f.name}_id"
-        val nullable = joinCol?.boolAttr("nullable") ?: true
+        // 명시적 @JoinColumn(nullable=...) 이 최우선. 미지정이면 관계 필드 타입의 null 가능성으로 추론.
+        val nullable = joinCol?.declaredBoolAttr("nullable") ?: !isNonNullType(f)
         val unique = joinCol?.boolAttr("unique") ?: (qn in JpaAnnotations.ONE_TO_ONE)
 
         return ColumnInfo(
@@ -408,29 +431,33 @@ class Jpa3dAnalyzer(private val project: Project) {
         asPrimaryKey: Boolean = false
     ): List<ColumnInfo> {
         val embeddable = (f.type as? PsiClassType)?.resolve()?.toUElementOfType<UClass>() ?: return emptyList()
+        // @Embeddable 도 주생성자 프로퍼티를 쓸 수 있으므로 동일하게 파라미터 어노테이션을 병합.
+        val embeddableParamAnns = constructorParamAnnotations(embeddable)
         return embeddable.fields.mapNotNull { ef ->
             val psi = ef.javaPsi as? PsiField
             if (psi?.hasModifierProperty(PsiModifier.STATIC) == true) return@mapNotNull null
-            if (ef.uAnnotations.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) return@mapNotNull null
-            val col = buildColumn(ef, indexedCols, uniqueCols, sequenceGenerators)
+            val efAnns = ef.effectiveAnnotations(embeddableParamAnns)
+            if (efAnns.any { it.qualifiedName in JpaAnnotations.TRANSIENT }) return@mapNotNull null
+            val col = buildColumn(ef, efAnns, indexedCols, uniqueCols, sequenceGenerators)
             if (asPrimaryKey) col.copy(primaryKey = true, nullable = false) else col
         }
     }
 
     private fun buildColumn(
         f: UField,
+        annotations: List<UAnnotation>,
         indexedCols: Set<String>,
         uniqueCols: Set<String>,
         sequenceGenerators: Map<String, String>
     ): ColumnInfo {
-        val annotations = f.uAnnotations
         val isPk = annotations.any { it.qualifiedName in JpaAnnotations.ID }
         val columnAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.COLUMN }
         val generatedAnn = annotations.firstOrNull { it.qualifiedName in JpaAnnotations.GENERATED_VALUE }
 
         // @Column(name="") (name 미지정) 은 빈 문자열로 들어오므로 null 로 정규화 — JPA 규약상 필드명 사용.
         val columnName = columnAnn?.stringAttr("name")?.takeIf { it.isNotBlank() }
-        val nullable = columnAnn?.boolAttr("nullable") ?: true
+        // 명시적 @Column(nullable=...) 이 최우선. 미지정이면 필드 타입의 null 가능성으로 추론.
+        val nullable = columnAnn?.declaredBoolAttr("nullable") ?: !isNonNullType(f)
         val columnUnique = columnAnn?.boolAttr("unique") ?: false
         val length = columnAnn?.intAttr("length")
         val precision = columnAnn?.intAttr("precision")
@@ -490,6 +517,7 @@ class Jpa3dAnalyzer(private val project: Project) {
     private fun buildRelationLink(
         owner: String,
         f: UField,
+        annotations: List<UAnnotation>,
         relAnn: UAnnotation,
         knownEntityFqns: Set<String>
     ): GraphLink? {
@@ -510,7 +538,7 @@ class Jpa3dAnalyzer(private val project: Project) {
         // MANY_TO_MANY owning side(mappedBy 없음)에서만 조인 테이블 메타를 실어 DDL 이 한 번만 생성.
         val owningManyToMany = relation == Relation.MANY_TO_MANY && mappedBy.isNullOrBlank()
         val joinTableAnn = if (owningManyToMany) {
-            f.uAnnotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_TABLE }
+            annotations.firstOrNull { it.qualifiedName in JpaAnnotations.JOIN_TABLE }
         } else null
         val joinTableName = joinTableAnn?.stringAttr("name")?.takeIf { it.isNotBlank() }
         val joinColumnName = firstJoinColumnName(joinTableAnn, "joinColumns")
@@ -697,6 +725,31 @@ class Jpa3dAnalyzer(private val project: Project) {
 
     private fun UAnnotation.boolAttr(name: String): Boolean? =
         findAttributeValue(name)?.evaluate() as? Boolean
+
+    /**
+     * **명시적으로 선언된** boolean 속성만 읽는다 (annotation default 와 구분).
+     *
+     * `findAttributeValue` 는 미선언 시 정의부 default 를 돌려주므로 `@Column(nullable=false)`
+     * 와 "@Column 만 붙고 nullable 미지정" 을 구분할 수 없다. nullability 추론(아래 [isNonNullType])
+     * 은 사용자가 직접 nullable 을 적었을 때만 그 값을 따라야 하므로 declared 값이 필요하다.
+     */
+    private fun UAnnotation.declaredBoolAttr(name: String): Boolean? =
+        findDeclaredAttributeValue(name)?.evaluate() as? Boolean
+
+    /**
+     * 필드 타입이 non-null 이라 NOT NULL 로 봐야 하는가.
+     *
+     *  - JVM primitive (Java `int`/`long`…, Kotlin non-null `Int`/`Long`…) 은 본질적으로 non-null.
+     *  - Kotlin non-null 참조 타입(`String`) 은 light class 가 타입에 `@NotNull` 을 부여한다.
+     *  - Java 참조 타입 / Kotlin nullable(`String?`) 은 `@NotNull` 이 없어 nullable 로 본다.
+     */
+    private fun isNonNullType(f: UField): Boolean {
+        val type = f.type
+        if (type is PsiPrimitiveType) return true
+        val typeAnns = type.annotations.asSequence()
+        val fieldAnns = (f.javaPsi as? PsiField)?.annotations?.asSequence() ?: emptySequence()
+        return (typeAnns + fieldAnns).any { it.qualifiedName?.substringAfterLast('.') == "NotNull" }
+    }
 
     private fun UAnnotation.intAttr(name: String): Int? =
         (findAttributeValue(name)?.evaluate() as? Number)?.toInt()
