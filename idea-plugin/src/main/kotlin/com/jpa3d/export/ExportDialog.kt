@@ -14,8 +14,8 @@ import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.jpa3d.Jpa3dBrowserHolder
 import com.jpa3d.model.GraphScope
+import com.intellij.ui.components.panels.VerticalLayout
 import java.awt.BorderLayout
-import java.awt.GridLayout
 import java.nio.file.Path
 import java.nio.file.Paths
 import javax.swing.ButtonGroup
@@ -38,8 +38,8 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
     private val cbJson = JCheckBox("JSON (단순화 스키마)", true)
     private val cbDdl = JCheckBox("DDL (SQL)", true)
     private val cbMermaid = JCheckBox("Mermaid (.mmd)", true)
-    private val cbSnapshotPng = JCheckBox("현재 뷰 스냅샷 — PNG", false)
-    private val cbSnapshotSvg = JCheckBox("현재 뷰 스냅샷 — SVG (2D 뷰만)", false)
+    private val cbSnapshotPng = JCheckBox("PNG (2D · 3D)", false)
+    private val cbSnapshotSvg = JCheckBox("SVG (2D 뷰만)", false)
 
     private val cbSnakeCase = JCheckBox("snake_case 이름 변환 (UserAccount → user_account)", true)
     private val cbDropExisting = JCheckBox("DROP TABLE IF EXISTS 헤더 추가 (재실행 안전)", false)
@@ -81,66 +81,89 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         setOKButtonText("Export")
         init()
 
-        // 방언 콤보 + DDL 옵션은 DDL 체크가 켜진 경우만 활성화.
-        val refreshEnabled = {
-            dialectCombo.isEnabled = cbDdl.isSelected
-            cbSnakeCase.isEnabled = cbDdl.isSelected
-            cbDropExisting.isEnabled = cbDdl.isSelected
-            val curr = rbCurrent.isSelected
-            seedTypeCombo.isEnabled = curr
-            seedField.isEnabled = curr
-            depthSpinner.isEnabled = curr
-        }
         cbDdl.addActionListener { refreshEnabled() }
         rbAll.addActionListener { refreshEnabled() }
         rbCurrent.addActionListener { refreshEnabled() }
         refreshEnabled()
 
-        // viewer 현재 뷰 모드를 백그라운드에서 조회 → 3D 면 SVG 스냅샷 비활성화.
-        // 조회 실패 시(viewer 미준비 등) 둘 다 활성 상태 유지하고 실행 시 에러로 안내.
-        probeViewMode()
+        // viewer 현재 뷰 상태를 백그라운드에서 조회 → 3D 면 SVG 비활성화 + seed prefill.
+        // 조회 실패 시(viewer 미준비 등) 기본값 유지.
+        probeViewState()
     }
 
-    private fun probeViewMode() {
+    // 방언 콤보 + DDL 옵션은 DDL 체크가 켜진 경우만, seed 입력은 '현재 뷰' 범위일 때만 활성화.
+    private fun refreshEnabled() {
+        dialectCombo.isEnabled = cbDdl.isSelected
+        cbSnakeCase.isEnabled = cbDdl.isSelected
+        cbDropExisting.isEnabled = cbDdl.isSelected
+        val curr = rbCurrent.isSelected
+        seedTypeCombo.isEnabled = curr
+        seedField.isEnabled = curr
+        depthSpinner.isEnabled = curr
+    }
+
+    private fun probeViewState() {
         val browser = project.service<Jpa3dBrowserHolder>().browser ?: run {
             cbSnapshotPng.isEnabled = false
             cbSnapshotSvg.isEnabled = false
-            cbSnapshotPng.text = "현재 뷰 스냅샷 — PNG (viewer 미열림)"
-            cbSnapshotSvg.text = "현재 뷰 스냅샷 — SVG (viewer 미열림)"
+            cbSnapshotPng.text = "PNG (viewer 미열림)"
+            cbSnapshotSvg.text = "SVG (viewer 미열림)"
             return
         }
         ApplicationManager.getApplication().executeOnPooledThread {
-            val mode = ViewerSnapshot(browser).queryViewMode()
+            val state = ViewerSnapshot(browser).queryViewState()
             ApplicationManager.getApplication().invokeLater {
-                if (mode == "3d") {
+                if (state == null) return@invokeLater
+                if (state.mode == "3d") {
                     cbSnapshotSvg.isSelected = false
                     cbSnapshotSvg.isEnabled = false
-                    cbSnapshotSvg.text = "현재 뷰 스냅샷 — SVG (3D 뷰에선 미지원)"
+                    cbSnapshotSvg.text = "SVG (3D 뷰에선 미지원)"
+                }
+                // viewer 가 중심(seed) 모드로 보고 있으면 그 seed/타입/depth 를 채우고
+                // '현재 뷰' 범위를 기본 선택 — 보던 화면을 그대로 export 하는 흐름.
+                if (state.scope == "seed" && !state.seed.isNullOrBlank()) {
+                    seedField.text = state.seed
+                    seedTypeCombo.selectedIndex = if (state.seedType == GraphScope.SEED_TYPE_PACKAGE) 1 else 0
+                    state.depth?.let { depthSpinner.value = it.coerceIn(0, 10) }
+                    rbCurrent.isSelected = true
+                    refreshEnabled()
                 }
             }
         }
     }
 
     override fun createCenterPanel(): JComponent {
-        val formatPanel = JPanel(GridLayout(0, 1, 0, 4)).apply {
-            add(cbJson); add(cbDdl); add(cbMermaid)
-            add(cbSnapshotPng); add(cbSnapshotSvg)
-        }
-
-        val dialectPanel = JPanel(BorderLayout()).apply {
+        val dialectPanel = JPanel(BorderLayout(8, 0)).apply {
             add(JBLabel("DDL 방언:"), BorderLayout.WEST)
             add(dialectCombo, BorderLayout.CENTER)
         }
 
-        val ddlOptionsPanel = JPanel(GridLayout(0, 1, 0, 2)).apply {
-            border = JBUI.Borders.emptyLeft(8)
+        // DDL 종속 옵션 — cbDdl 아래 들여써서 종속 관계를 시각적으로 드러낸다.
+        // GridLayout(균등분할) 대신 VerticalLayout — 각 행이 자연 높이로 쌓여 불필요한 세로 stretch 가 없다.
+        val ddlOptionsPanel = JPanel(VerticalLayout(4)).apply {
+            border = JBUI.Borders.empty(2, 24, 4, 0)
+            add(dialectPanel)
             add(cbSnakeCase)
             add(cbDropExisting)
         }
 
+        // 데이터 export — 파일로 떨어지는 산출물(JSON/DDL/Mermaid).
+        val dataFormatPanel = JPanel(VerticalLayout(4)).apply {
+            add(cbJson)
+            add(cbDdl)
+            add(ddlOptionsPanel)
+            add(cbMermaid)
+        }
+
+        // 현재 뷰 스냅샷 — viewer 화면 캡처. 데이터 export 와 성격이 달라 분리.
+        val snapshotPanel = JPanel(VerticalLayout(4)).apply {
+            add(cbSnapshotPng)
+            add(cbSnapshotSvg)
+        }
+
         ButtonGroup().apply { add(rbAll); add(rbCurrent) }
 
-        val scopePanel = JPanel(GridLayout(0, 1, 0, 4)).apply {
+        val scopePanel = JPanel(VerticalLayout(4)).apply {
             add(rbAll)
             add(rbCurrent)
             add(buildSubField("Seed 종류:", seedTypeCombo))
@@ -149,9 +172,9 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         }
 
         return FormBuilder.createFormBuilder()
-            .addLabeledComponent("출력 형식:", formatPanel, 1, false)
-            .addComponent(dialectPanel)
-            .addComponent(ddlOptionsPanel)
+            .addLabeledComponent("데이터 export:", dataFormatPanel, 1, false)
+            .addSeparator()
+            .addLabeledComponent("현재 뷰 스냅샷:", snapshotPanel, 1, false)
             .addSeparator()
             .addLabeledComponent("범위:", scopePanel, 1, false)
             .addSeparator()

@@ -35,16 +35,32 @@ class ViewerSnapshot(private val browser: JBCefBrowser) {
         val error: String? = null
     )
 
-    /** "2d" / "3d" / null(질의 실패). */
-    fun queryViewMode(timeoutSec: Long = 3): String? {
+    /** viewer 의 현재 뷰 상태. 필드가 비어 있을 수 있음(미준비/질의 실패). */
+    data class ViewState(
+        val mode: String?,
+        val scope: String?,
+        val seed: String?,
+        val seedType: String?,
+        val depth: Int?
+    )
+
+    /** 현재 뷰 상태(모드/범위/seed 등)를 한 번에 조회. null 이면 질의 실패. */
+    fun queryViewState(timeoutSec: Long = 3): ViewState? {
         val payload = executeAndAwait(
-            jsExpression = "JSON.stringify({mode: window.__JPA3D_VIEW_STATE__ && window.__JPA3D_VIEW_STATE__().mode})",
+            jsExpression = "JSON.stringify(window.__JPA3D_VIEW_STATE__ ? window.__JPA3D_VIEW_STATE__() : {})",
             timeoutSec = timeoutSec
         ) ?: return null
         return try {
-            mapper.readTree(payload).path("mode").asText(null)?.takeIf { it.isNotEmpty() }
+            val n = mapper.readTree(payload)
+            ViewState(
+                mode = n.path("mode").asText(null)?.takeIf { it.isNotEmpty() },
+                scope = n.path("scope").asText(null)?.takeIf { it.isNotEmpty() },
+                seed = n.path("seed").asText(null)?.takeIf { it.isNotEmpty() },
+                seedType = n.path("seedType").asText(null)?.takeIf { it.isNotEmpty() },
+                depth = n.path("depth").takeIf { it.isNumber }?.asInt()
+            )
         } catch (e: Exception) {
-            log.warn("queryViewMode parse failed: ${e.message}")
+            log.warn("queryViewState parse failed: ${e.message}")
             null
         }
     }
