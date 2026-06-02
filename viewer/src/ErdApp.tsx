@@ -58,6 +58,9 @@ function writeParamsToHash(params: ErdParams) {
   }
 }
 
+/** 상단 툴바 높이 — 그래프 영역 오프셋/팝오버 위치와 공유. */
+const TOOLBAR_H = 38;
+
 /** 검색 드롭다운에 표시할 정규화된 제안 항목 — 패키지/노드 두 종류를 한 모양으로. */
 interface SuggestItem {
   key: string;
@@ -87,10 +90,17 @@ export default function ErdApp() {
   // plugin 측 ViewerSnapshot 가 window.__JPA3D_SNAPSHOT__/__JPA3D_VIEW_STATE__ 을 호출.
   useEffect(() => {
     const w = window as unknown as {
-      __JPA3D_VIEW_STATE__?: () => { mode: ViewMode };
+      __JPA3D_VIEW_STATE__?: () => { mode: ViewMode; scope: Scope; seed: string; seedType: SeedType; depth: number };
       __JPA3D_SNAPSHOT__?: (format: "png" | "svg") => Promise<{ format: string; data?: string; error?: string }>;
     };
-    w.__JPA3D_VIEW_STATE__ = () => ({ mode: params.view });
+    // plugin(Export 다이얼로그)이 현재 뷰 상태를 읽어 seed/scope 를 prefill 한다.
+    w.__JPA3D_VIEW_STATE__ = () => ({
+      mode: params.view,
+      scope: params.scope,
+      seed: params.seed ?? "",
+      seedType: params.seedType,
+      depth: params.depth
+    });
     w.__JPA3D_SNAPSHOT__ = async (format) => {
       try {
         if (params.view === "2d") {
@@ -113,7 +123,7 @@ export default function ErdApp() {
       delete w.__JPA3D_VIEW_STATE__;
       delete w.__JPA3D_SNAPSHOT__;
     };
-  }, [params.view]);
+  }, [params]);
 
   // 윈도우 리사이즈
   useEffect(() => {
@@ -271,10 +281,10 @@ export default function ErdApp() {
     <div style={{ position: "fixed", inset: 0, background: UI.canvas, color: UI.text }}>
       {/* 컨트롤 바 — 좁은 툴윈도우에서 줄바꿈되도록 wrap */}
       <div style={{
-        position: "absolute", top: 0, left: 0, right: 0, minHeight: 48,
-        display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12,
-        padding: "6px 12px", rowGap: 8,
-        background: UI.panel, borderBottom: `1px solid ${UI.border}`, fontSize: 13, zIndex: 30
+        position: "absolute", top: 0, left: 0, right: 0, minHeight: TOOLBAR_H,
+        display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
+        padding: "4px 10px", rowGap: 6,
+        background: UI.panel, borderBottom: `1px solid ${UI.border}`, fontSize: 12, zIndex: 30
       }}>
         <ScopeToggle value={params.scope} onChange={(scope) => setParams({ ...params, scope })} />
         <Divider />
@@ -294,8 +304,6 @@ export default function ErdApp() {
         <LevelToggle value={params.level} onChange={(level) => setParams({ ...params, level })} />
         <Divider />
         <ExtendsToggle value={params.showExtends} onChange={(showExtends) => setParams({ ...params, showExtends })} />
-        <Divider />
-        <ViewToggle value={params.view} onChange={(view) => setParams({ ...params, view })} />
 
         {/* 검색 — 남는 공간을 차지하다가 좁아지면 다음 줄로 */}
         <div style={{ position: "relative", flex: "1 1 200px", minWidth: 160, maxWidth: 380 }}>
@@ -403,7 +411,9 @@ export default function ErdApp() {
       </div>
 
       {/* 그래프 영역 */}
-      <div style={{ position: "absolute", top: 48, left: 0, right: 0, bottom: 0 }}>
+      <div style={{ position: "absolute", top: TOOLBAR_H, left: 0, right: 0, bottom: 0 }}>
+        {/* 뷰 모드(렌더 방식) — 데이터 필터와 성격이 달라 캔버스 좌상단에 분리 배치 */}
+        <ViewModeControl value={params.view} onChange={(view) => setParams({ ...params, view })} />
         {isIndexing ? (
           <IndexingState />
         ) : showEmpty ? (
@@ -418,7 +428,7 @@ export default function ErdApp() {
               ref={erd2dRef}
               data={data}
               width={size.w}
-              height={size.h - 48}
+              height={size.h - TOOLBAR_H}
               level={params.level}
               highlightedIds={highlightedIds}
               highlightBaseId={params.seed}
@@ -433,7 +443,7 @@ export default function ErdApp() {
               ref={graphRef}
               data={data}
               width={size.w}
-              height={size.h - 48}
+              height={size.h - TOOLBAR_H}
               level={params.level}
               highlightedIds={highlightedIds}
               highlightBaseId={params.seed}
@@ -450,20 +460,58 @@ export default function ErdApp() {
   );
 }
 
-// 모든 토글 그룹은 [라벨: 버튼…] 형태로 통일 — 라벨 정책 일관.
-const groupStyle: React.CSSProperties = { display: "flex", gap: 4, alignItems: "center" };
-const labelStyle: React.CSSProperties = { color: UI.textMuted, fontSize: 12, whiteSpace: "nowrap" };
+// 모든 토글 그룹은 [라벨: 세그먼트] 형태로 통일 — 라벨 정책 일관.
+const groupStyle: React.CSSProperties = { display: "flex", gap: 6, alignItems: "center" };
+const labelStyle: React.CSSProperties = { color: UI.textMuted, fontSize: 11, whiteSpace: "nowrap" };
 
 function Divider() {
-  return <div aria-hidden style={{ width: 1, height: 20, background: UI.border, flexShrink: 0 }} />;
+  return <div aria-hidden style={{ width: 1, height: 18, background: UI.border, flexShrink: 0 }} />;
+}
+
+/** 붙은 세그먼트 컨트롤 컨테이너 — 개별 버튼을 한 덩어리로 묶어 가로 공간을 줄인다. */
+function SegGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div role="group" style={{
+      display: "inline-flex", background: UI.panel,
+      border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.control, overflow: "hidden"
+    }}>
+      {children}
+    </div>
+  );
+}
+
+/** 세그먼트 한 칸. first=false 면 좌측에 칸막이. */
+function SegItem({ active, onClick, children, title, first }: {
+  active: boolean; onClick: () => void; children: React.ReactNode; title?: string; first?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={active}
+      style={{
+        padding: "2px 9px", height: 24, fontSize: 12, lineHeight: 1,
+        background: active ? UI.accent : "transparent",
+        color: active ? "#fff" : UI.textDim,
+        border: "none",
+        borderLeft: first ? "none" : `1px solid ${UI.borderStrong}`,
+        cursor: "pointer",
+        transition: "background 0.12s ease, color 0.12s ease"
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
 function ScopeToggle({ value, onChange }: { value: Scope; onChange: (v: Scope) => void }) {
   return (
     <div style={groupStyle}>
       <span style={labelStyle}>범위:</span>
-      <SegBtn active={value === "all"} onClick={() => onChange("all")} title="모든 엔티티 표시">전체</SegBtn>
-      <SegBtn active={value === "seed"} onClick={() => onChange("seed")} title="선택한 중심에서 도달 가능한 부분만">중심</SegBtn>
+      <SegGroup>
+        <SegItem first active={value === "all"} onClick={() => onChange("all")} title="모든 엔티티 표시">전체</SegItem>
+        <SegItem active={value === "seed"} onClick={() => onChange("seed")} title="선택한 중심에서 도달 가능한 부분만">중심</SegItem>
+      </SegGroup>
     </div>
   );
 }
@@ -472,8 +520,10 @@ function SeedTypeToggle({ value, onChange }: { value: SeedType; onChange: (v: Se
   return (
     <div style={groupStyle}>
       <span style={labelStyle}>기준:</span>
-      <SegBtn active={value === "fqn"} onClick={() => onChange("fqn")}>엔티티</SegBtn>
-      <SegBtn active={value === "package"} onClick={() => onChange("package")}>패키지</SegBtn>
+      <SegGroup>
+        <SegItem first active={value === "fqn"} onClick={() => onChange("fqn")}>엔티티</SegItem>
+        <SegItem active={value === "package"} onClick={() => onChange("package")}>패키지</SegItem>
+      </SegGroup>
     </div>
   );
 }
@@ -482,9 +532,11 @@ function LevelToggle({ value, onChange }: { value: Level; onChange: (v: Level) =
   return (
     <div style={groupStyle}>
       <span style={labelStyle}>표시:</span>
-      <SegBtn active={value === 1} onClick={() => onChange(1)}>관계만</SegBtn>
-      <SegBtn active={value === 2} onClick={() => onChange(2)}>+컬럼</SegBtn>
-      <SegBtn active={value === 3} onClick={() => onChange(3)}>+리포지토리</SegBtn>
+      <SegGroup>
+        <SegItem first active={value === 1} onClick={() => onChange(1)}>관계만</SegItem>
+        <SegItem active={value === 2} onClick={() => onChange(2)}>+컬럼</SegItem>
+        <SegItem active={value === 3} onClick={() => onChange(3)}>+리포지토리</SegItem>
+      </SegGroup>
     </div>
   );
 }
@@ -493,42 +545,24 @@ function ExtendsToggle({ value, onChange }: { value: boolean; onChange: (v: bool
   return (
     <div style={groupStyle}>
       <span style={labelStyle}>상속:</span>
-      <SegBtn active={value} onClick={() => onChange(!value)} title="상속 / @MappedSuperclass 관계 표시">
-        {value ? "ON" : "OFF"}
-      </SegBtn>
+      <SegGroup>
+        <SegItem first active={value} onClick={() => onChange(!value)} title="상속 / @MappedSuperclass 관계 표시">
+          {value ? "ON" : "OFF"}
+        </SegItem>
+      </SegGroup>
     </div>
   );
 }
 
-function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
+/** 캔버스 좌상단 오버레이 — 뷰 렌더 모드(3D/2D) 전환. SegGroup 의 panel 배경으로 그래프 위에서도 읽힌다. */
+function ViewModeControl({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
   return (
-    <div style={groupStyle}>
-      <span style={labelStyle}>뷰:</span>
-      <SegBtn active={value === "3d"} onClick={() => onChange("3d")}>3D</SegBtn>
-      <SegBtn active={value === "2d"} onClick={() => onChange("2d")}>2D</SegBtn>
+    <div style={{ position: "absolute", top: 16, left: 16, zIndex: 20 }}>
+      <SegGroup>
+        <SegItem first active={value === "3d"} onClick={() => onChange("3d")}>3D</SegItem>
+        <SegItem active={value === "2d"} onClick={() => onChange("2d")}>2D</SegItem>
+      </SegGroup>
     </div>
-  );
-}
-
-function SegBtn({ active, onClick, children, title }: {
-  active: boolean; onClick: () => void; children: React.ReactNode; title?: string;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      aria-pressed={active}
-      style={{
-        padding: "4px 10px", fontSize: 12,
-        background: active ? UI.accent : "transparent",
-        color: active ? "#fff" : UI.textDim,
-        border: `1px solid ${active ? UI.accent : UI.borderStrong}`,
-        borderRadius: 4, cursor: "pointer",
-        transition: "background 0.12s ease, color 0.12s ease, border-color 0.12s ease"
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -553,7 +587,7 @@ function HelpPopover({ onClose }: { onClose: () => void }) {
   const rows: [string, string][] = [
     ["클릭", "엔티티의 소스 파일로 이동"],
     ["우클릭", "그 노드를 중심(seed)으로 다시 탐색"],
-    ["드래그 (2D)", "노드 위치 이동 · '위치초기화'로 복원"],
+    ["드래그 (2D)", "노드 위치 이동 · ↺ 로 복원"],
     ["컬럼에 마우스", "해당 엔티티에 연결된 관계 강조"],
     ["검색", "입력 후 ↑/↓ 이동, Enter 로 선택"],
     ["휠 / +−", "확대·축소, 'fit' 으로 전체 보기"],
@@ -567,7 +601,7 @@ function HelpPopover({ onClose }: { onClose: () => void }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          position: "absolute", top: 52, right: 12, width: 320,
+          position: "absolute", top: TOOLBAR_H + 6, right: 12, width: 320,
           background: UI.panel, color: UI.text,
           border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.container,
           padding: "12px 14px", fontSize: 12, lineHeight: 1.5,

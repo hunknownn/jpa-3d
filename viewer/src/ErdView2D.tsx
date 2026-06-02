@@ -466,10 +466,11 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         {nodeOffsets.size > 0 && (
           <button
             style={zoomBtnStyle}
-            title="드래그한 노드 위치를 자동 레이아웃으로 되돌림"
+            title="위치 초기화 — 드래그한 노드를 자동 레이아웃으로 되돌림"
+            aria-label="위치 초기화"
             onClick={() => setNodeOffsets(new Map())}
           >
-            위치초기화
+            ↺
           </button>
         )}
         <button
