@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.jpa3d.Jpa3dBrowserHolder
+import com.jpa3d.model.GraphScope
 import java.awt.BorderLayout
 import java.awt.GridLayout
 import java.nio.file.Path
@@ -57,6 +58,10 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
 
     private val rbAll = JRadioButton("전체 모델", true)
     private val rbCurrent = JRadioButton("현재 뷰 (seed + depth)", false)
+    // seed 해석 방식. 표시 라벨 → GraphScope seedType 값.
+    private val seedTypeLabels = arrayOf("엔티티 FQN", "패키지")
+    private val seedTypeValues = arrayOf(GraphScope.SEED_TYPE_FQN, GraphScope.SEED_TYPE_PACKAGE)
+    private val seedTypeCombo = JComboBox(seedTypeLabels)
     private val seedField = JBTextField()
     private val depthSpinner = JSpinner(SpinnerNumberModel(2, 0, 10, 1))
 
@@ -82,6 +87,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
             cbSnakeCase.isEnabled = cbDdl.isSelected
             cbDropExisting.isEnabled = cbDdl.isSelected
             val curr = rbCurrent.isSelected
+            seedTypeCombo.isEnabled = curr
             seedField.isEnabled = curr
             depthSpinner.isEnabled = curr
         }
@@ -137,7 +143,8 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         val scopePanel = JPanel(GridLayout(0, 1, 0, 4)).apply {
             add(rbAll)
             add(rbCurrent)
-            add(buildSubField("Seed FQN:", seedField))
+            add(buildSubField("Seed 종류:", seedTypeCombo))
+            add(buildSubField("Seed (FQN/패키지):", seedField))
             add(buildSubField("Depth:", depthSpinner))
         }
 
@@ -170,7 +177,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         val out = outputField.text.trim()
         if (out.isEmpty()) return ValidationInfo("출력 폴더를 지정해주세요.", outputField)
         if (rbCurrent.isSelected && seedField.text.trim().isEmpty()) {
-            return ValidationInfo("현재 뷰 범위에는 seed FQN 이 필요합니다.", seedField)
+            return ValidationInfo("현재 뷰 범위에는 seed (FQN 또는 패키지) 가 필요합니다.", seedField)
         }
         return null
     }
@@ -179,6 +186,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         outputDir = Paths.get(outputField.text.trim()),
         scope = if (rbCurrent.isSelected) ExportScope.CURRENT_VIEW else ExportScope.ALL,
         seed = seedField.text.trim(),
+        seedType = seedTypeValues[seedTypeCombo.selectedIndex.coerceIn(0, seedTypeValues.size - 1)],
         depth = (depthSpinner.value as Number).toInt(),
         formatJson = cbJson.isSelected,
         formatDdl = cbDdl.isSelected,

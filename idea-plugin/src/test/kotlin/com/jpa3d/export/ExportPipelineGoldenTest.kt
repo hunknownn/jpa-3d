@@ -383,6 +383,42 @@ class ExportPipelineGoldenTest : LightJavaCodeInsightFixtureTestCase() {
         assertTrue("DROP 이 CREATE 보다 뒤:\n$sql", dropIdx < createIdx)
     }
 
+    // ===================================================================================
+    // package 단위 scope — seedType="package" 가 toExportModel 까지 흘러 해당 패키지만 export
+    // ===================================================================================
+
+    fun testPackageScopeExportsOnlyThatPackage() {
+        // order 패키지(2개) + user 패키지(1개). FK 없음 → depth 0 이면 order 만 남아야.
+        myFixture.addClass(
+            """
+            package com.app.order;
+            import jakarta.persistence.*;
+            @Entity public class Order { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.app.order;
+            import jakarta.persistence.*;
+            @Entity public class OrderItem { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.app.user;
+            import jakarta.persistence.*;
+            @Entity public class Account { @Id Long id; }
+            """.trimIndent()
+        )
+        val graph = Jpa3dAnalyzer(project).analyze()
+        val model = ExportConverter.toExportModel(
+            graph, ExportScope.CURRENT_VIEW, seed = "com.app.order", depth = 0, seedType = "package"
+        )
+        val fqns = model.entities.map { it.fqn }.toSet()
+        assertEquals("order 패키지 엔티티만 남아야 (got $fqns)",
+            setOf("com.app.order.Order", "com.app.order.OrderItem"), fqns)
+    }
+
     private fun assertContains(haystack: String, needle: String) {
         assertTrue("'$needle' 가 출력에 없음:\n$haystack", haystack.contains(needle))
     }

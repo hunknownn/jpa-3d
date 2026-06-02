@@ -13,8 +13,8 @@ import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.search.GlobalSearchScope
 import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import com.jpa3d.model.GraphData
-import com.jpa3d.model.GraphLink
 import com.jpa3d.model.GraphNode
+import com.jpa3d.model.GraphScope
 import com.jpa3d.model.Relation
 
 /**
@@ -55,13 +55,14 @@ class Jpa3dRequestHandler(private val project: Project) {
      *
      * args:
      *  - scope: "all" | "seed"
-     *  - seed: FQN (scope=seed 일 때 BFS 시작점)
+     *  - seed: scope=seed 일 때 BFS 시작점 (seedType 에 따라 FQN 또는 패키지)
+     *  - seedType: "fqn" (기본) | "package"
      *  - depth: BFS 깊이 (scope=seed 일 때만)
      *  - level: 1 (관계만) / 2 (+컬럼) / 3 (+Repository)
      *
      * 필터링 순서:
      *  1. level<3 이면 Repository 노드와 USES_ENTITY 엣지 제거
-     *  2. scope=seed 면 seed 에서 BFS 로 depth 단계까지 도달 가능한 노드만 유지
+     *  2. scope=seed 면 seed(들)에서 BFS 로 depth 단계까지 도달 가능한 노드만 유지
      *  3. level<2 이면 entity 의 컬럼을 비움 (entity 메타는 유지해 카드 헤더 색은 보존)
      *  4. 양 끝 노드가 살아남은 엣지만 유지
      */
@@ -72,12 +73,13 @@ class Jpa3dRequestHandler(private val project: Project) {
         }
         val scope = (args?.get("scope") as? String) ?: "all"
         val seed = args?.get("seed") as? String
+        val seedType = (args?.get("seedType") as? String) ?: GraphScope.SEED_TYPE_FQN
         val depth = (args?.get("depth") as? Number)?.toInt() ?: 2
         val level = (args?.get("level") as? Number)?.toInt()?.coerceIn(1, 3) ?: 1
         val showExtends = (args?.get("showExtends") as? Boolean) ?: true
 
         val graph = project.service<Jpa3dAnalysisCache>().getGraphData()
-        val filtered = filterGraph(graph, scope, seed, depth, level, showExtends)
+        val filtered = filterGraph(graph, scope, seed, seedType, depth, level, showExtends)
         return mapper.writeValueAsString(filtered)
     }
 
@@ -85,6 +87,7 @@ class Jpa3dRequestHandler(private val project: Project) {
         g: GraphData,
         scope: String,
         seed: String?,
+        seedType: String,
         depth: Int,
         level: Int,
         showExtends: Boolean
@@ -100,16 +103,15 @@ class Jpa3dRequestHandler(private val project: Project) {
             nodes = nodes.filter { it.entity?.kind != "mappedSuperclass" }
         }
 
-        // 2) scope=seed → BFS
+        // 2) scope=seed → 멀티 소스 BFS (FQN=단일, package=해당 패키지 엔티티 전부가 출발점)
         if (scope == "seed" && !seed.isNullOrBlank()) {
-            val nodeIds = nodes.map { it.id }.toSet()
-            if (seed in nodeIds) {
-                val reachable = bfs(seed, links, depth)
-                nodes = nodes.filter { it.id in reachable }
-            } else {
-                // seed 가 필터로 제거됐으면 그래프 비움
+            val seeds = GraphScope.resolveSeeds(nodes, seedType, seed)
+            if (seeds.isEmpty()) {
+                // seed 매칭 노드가 없으면(필터로 제거됐거나 빈 패키지) 그래프 비움
                 return GraphData(seed = seed, depth = depth, nodes = emptyList(), links = emptyList())
             }
+            val reachable = GraphScope.reachable(seeds, links, depth)
+            nodes = nodes.filter { it.id in reachable }
         }
 
         // 3) level<2 면 컬럼 제거 (entity 메타는 유지 — 카드 색/테이블명 등)
@@ -125,29 +127,6 @@ class Jpa3dRequestHandler(private val project: Project) {
         links = links.filter { it.source in keep && it.target in keep }
 
         return GraphData(seed = seed.orEmpty(), depth = depth, nodes = nodes, links = links)
-    }
-
-    /** seed 에서 시작해 undirected 로 [maxDepth] 까지 도달 가능한 노드 id 집합. */
-    private fun bfs(seed: String, links: List<GraphLink>, maxDepth: Int): Set<String> {
-        if (maxDepth < 0) return setOf(seed)
-        val adj = HashMap<String, MutableList<String>>()
-        for (l in links) {
-            adj.getOrPut(l.source) { mutableListOf() }.add(l.target)
-            adj.getOrPut(l.target) { mutableListOf() }.add(l.source)
-        }
-        val visited = mutableSetOf(seed)
-        var frontier = listOf(seed)
-        repeat(maxDepth) {
-            val next = mutableListOf<String>()
-            for (id in frontier) {
-                for (n in adj[id].orEmpty()) {
-                    if (visited.add(n)) next.add(n)
-                }
-            }
-            if (next.isEmpty()) return visited
-            frontier = next
-        }
-        return visited
     }
 
     private fun handleSearch(args: Map<String, Any?>?): String {

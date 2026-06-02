@@ -3,6 +3,7 @@ package com.jpa3d.export
 import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphLink
 import com.jpa3d.model.GraphNode
+import com.jpa3d.model.GraphScope
 import java.time.Instant
 
 /**
@@ -26,9 +27,10 @@ object ExportConverter {
         graph: GraphData,
         scope: ExportScope,
         seed: String,
-        depth: Int
+        depth: Int,
+        seedType: String = GraphScope.SEED_TYPE_FQN
     ): ExportModel {
-        val filtered = filter(graph, scope, seed, depth)
+        val filtered = filter(graph, scope, seed, depth, seedType)
 
         // entity 가 있는 노드만 export — Repository/일반 인터페이스 제외.
         val entityNodes = filtered.nodes.filter { it.entity != null }
@@ -47,37 +49,15 @@ object ExportConverter {
         )
     }
 
-    private fun filter(g: GraphData, scope: ExportScope, seed: String, depth: Int): GraphData {
+    private fun filter(g: GraphData, scope: ExportScope, seed: String, depth: Int, seedType: String): GraphData {
         if (scope == ExportScope.ALL || seed.isBlank()) return g
-        val nodeIds = g.nodes.map { it.id }.toSet()
-        if (seed !in nodeIds) return g.copy(nodes = emptyList(), links = emptyList())
-        val reachable = bfs(seed, g.links, depth)
+        val seeds = GraphScope.resolveSeeds(g.nodes, seedType, seed)
+        if (seeds.isEmpty()) return g.copy(nodes = emptyList(), links = emptyList())
+        val reachable = GraphScope.reachable(seeds, g.links, depth)
         val nodes = g.nodes.filter { it.id in reachable }
         val keep = nodes.map { it.id }.toSet()
         val links = g.links.filter { it.source in keep && it.target in keep }
         return g.copy(nodes = nodes, links = links)
-    }
-
-    private fun bfs(seed: String, links: List<GraphLink>, maxDepth: Int): Set<String> {
-        if (maxDepth < 0) return setOf(seed)
-        val adj = HashMap<String, MutableList<String>>()
-        for (l in links) {
-            adj.getOrPut(l.source) { mutableListOf() }.add(l.target)
-            adj.getOrPut(l.target) { mutableListOf() }.add(l.source)
-        }
-        val visited = mutableSetOf(seed)
-        var frontier = listOf(seed)
-        repeat(maxDepth) {
-            val next = mutableListOf<String>()
-            for (id in frontier) {
-                for (n in adj[id].orEmpty()) {
-                    if (visited.add(n)) next.add(n)
-                }
-            }
-            if (next.isEmpty()) return visited
-            frontier = next
-        }
-        return visited
     }
 
     private fun toExportEntity(node: GraphNode): ExportEntity {

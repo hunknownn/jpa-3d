@@ -28,7 +28,7 @@ class ExportRunner(private val project: Project) {
         Files.createDirectories(options.outputDir)
 
         val graph: GraphData = project.service<Jpa3dAnalysisCache>().getGraphData()
-        val model = ExportConverter.toExportModel(graph, options.scope, options.seed, options.depth)
+        val model = ExportConverter.toExportModel(graph, options.scope, options.seed, options.depth, options.seedType)
 
         val written = mutableListOf<Path>()
         val skipped = mutableListOf<String>()

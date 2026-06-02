@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import GraphView, { GraphHandle } from "./GraphView";
 import ErdView2D, { Erd2dHandle } from "./ErdView2D";
 import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
 
 type Scope = "all" | "seed";
+type SeedType = "fqn" | "package";
 type Level = 1 | 2 | 3;
 type ViewMode = "3d" | "2d";
 
 interface ErdParams {
   scope: Scope;
   seed?: string;
+  /** seed 해석 방식: 단일 엔티티(fqn) vs 패키지+하위(package). */
+  seedType: SeedType;
   level: Level;
   depth: number;
   view: ViewMode;
@@ -29,10 +32,11 @@ function readParamsFromHash(): ErdParams {
   const level: Level = lvlRaw === 2 ? 2 : lvlRaw === 3 ? 3 : 1;
   const depth = parseInt(p.get("depth") ?? "2", 10);
   const seed = p.get("seed") ?? undefined;
+  const seedType: SeedType = p.get("seedType") === "package" ? "package" : "fqn";
   const view: ViewMode = p.get("view") === "2d" ? "2d" : "3d";
   // showExtends 미지정이면 기본 true (기존 동작 유지)
   const showExtends = p.get("extends") !== "0";
-  return { scope, seed, level, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
+  return { scope, seed, seedType, level, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
 }
 
 function writeParamsToHash(params: ErdParams) {
@@ -43,6 +47,7 @@ function writeParamsToHash(params: ErdParams) {
   if (!params.showExtends) p.set("extends", "0");
   if (params.scope === "seed") {
     if (params.seed) p.set("seed", params.seed);
+    if (params.seedType === "package") p.set("seedType", "package");
     p.set("depth", String(params.depth));
   }
   const newHash = `/erd?${p.toString()}`;
@@ -119,6 +124,7 @@ export default function ErdApp() {
     fetchErd({
       scope: params.scope,
       seed: params.seed,
+      seedType: params.seedType,
       depth: params.depth,
       level: params.level,
       showExtends: params.showExtends
@@ -164,16 +170,33 @@ export default function ErdApp() {
     if (n.entity == null) {
       const target = data.links.find((l) => l.source === n.id && l.relation === "USES_ENTITY")?.target;
       if (target) {
-        setParams({ ...params, scope: "seed", seed: target });
+        setParams({ ...params, scope: "seed", seedType: "fqn", seed: target });
         setQuery(target);
         setSuggests([]);
         return;
       }
     }
-    setParams({ ...params, scope: "seed", seed: n.id });
+    setParams({ ...params, scope: "seed", seedType: "fqn", seed: n.id });
     setQuery(n.id);
     setSuggests([]);
   }
+
+  function pickPackage(pkg: string) {
+    setParams({ ...params, scope: "seed", seedType: "package", seed: pkg });
+    setQuery(pkg);
+    setSuggests([]);
+  }
+
+  // 패키지 모드 제안: 검색 결과 노드들의 pkg 를 distinct 하게 추려 query 로 필터.
+  const packageSuggests = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return [] as string[];
+    const set = new Set<string>();
+    for (const n of suggests) {
+      if (n.pkg && n.pkg.toLowerCase().includes(q)) set.add(n.pkg);
+    }
+    return [...set].sort().slice(0, 20);
+  }, [suggests, query]);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0f172a", color: "#e2e8f0" }}>
@@ -184,6 +207,16 @@ export default function ErdApp() {
         background: "#1e293b", borderBottom: "1px solid #334155", fontSize: 13
       }}>
         <ScopeToggle value={params.scope} onChange={(scope) => setParams({ ...params, scope })} />
+        {params.scope === "seed" && (
+          <SeedTypeToggle
+            value={params.seedType}
+            onChange={(seedType) => {
+              // 기준 전환 시 기존 seed/검색어 초기화 — 엔티티 FQN 과 패키지는 매칭 규칙이 달라서.
+              setParams({ ...params, seedType, seed: undefined });
+              setQuery("");
+            }}
+          />
+        )}
         <LevelToggle value={params.level} onChange={(level) => setParams({ ...params, level })} />
         <ExtendsToggle value={params.showExtends} onChange={(showExtends) => setParams({ ...params, showExtends })} />
         <ViewToggle value={params.view} onChange={(view) => setParams({ ...params, view })} />
@@ -191,7 +224,19 @@ export default function ErdApp() {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder={params.scope === "seed" ? "seed 검색…" : "노드 검색 (하이라이트)"}
+            onKeyDown={(e) => {
+              // 패키지 모드: Enter 로 입력값을 패키지 seed 로 바로 적용 (접두 매칭).
+              if (e.key === "Enter" && params.scope === "seed" && params.seedType === "package" && query.trim()) {
+                pickPackage(query.trim());
+              }
+            }}
+            placeholder={
+              params.scope !== "seed"
+                ? "노드 검색 (하이라이트)"
+                : params.seedType === "package"
+                  ? "패키지 입력 후 Enter…"
+                  : "seed 엔티티 검색…"
+            }
             style={{
               width: 280, padding: "4px 8px", fontSize: 13,
               background: "#0f172a", color: "#e2e8f0",
@@ -210,7 +255,28 @@ export default function ErdApp() {
               }}
             >×</button>
           )}
-          {suggests.length > 0 && (
+          {params.scope === "seed" && params.seedType === "package" && packageSuggests.length > 0 && (
+            <div style={{
+              position: "absolute", top: 28, left: 0, width: 360,
+              background: "#1e293b", border: "1px solid #475569", borderRadius: 4,
+              maxHeight: 240, overflowY: "auto", zIndex: 10
+            }}>
+              {packageSuggests.map((pkg) => (
+                <div
+                  key={pkg}
+                  onClick={() => pickPackage(pkg)}
+                  style={{
+                    padding: "6px 10px", cursor: "pointer",
+                    borderBottom: "1px solid #334155", fontSize: 12
+                  }}
+                >
+                  <div>{pkg}</div>
+                  <div style={{ color: "#94a3b8", fontSize: 11 }}>패키지 (하위 포함)</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {!(params.scope === "seed" && params.seedType === "package") && suggests.length > 0 && (
             <div style={{
               position: "absolute", top: 28, left: 0, width: 360,
               background: "#1e293b", border: "1px solid #475569", borderRadius: 4,
@@ -297,6 +363,16 @@ function ScopeToggle({ value, onChange }: { value: Scope; onChange: (v: Scope) =
     <div style={{ display: "flex", gap: 4 }}>
       <SegBtn active={value === "all"} onClick={() => onChange("all")}>전체</SegBtn>
       <SegBtn active={value === "seed"} onClick={() => onChange("seed")}>seed 중심</SegBtn>
+    </div>
+  );
+}
+
+function SeedTypeToggle({ value, onChange }: { value: SeedType; onChange: (v: SeedType) => void }) {
+  return (
+    <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+      <span style={{ color: "#94a3b8", fontSize: 12 }}>기준:</span>
+      <SegBtn active={value === "fqn"} onClick={() => onChange("fqn")}>엔티티</SegBtn>
+      <SegBtn active={value === "package"} onClick={() => onChange("package")}>패키지</SegBtn>
     </div>
   );
 }

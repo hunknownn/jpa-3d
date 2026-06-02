@@ -25,6 +25,8 @@ data class ExportOptions(
     val scope: ExportScope,
     val seed: String,
     val depth: Int,
+    /** seed 해석 방식: "fqn" (기본, 단일 엔티티) | "package" (패키지+하위 전체). */
+    val seedType: String = com.jpa3d.model.GraphScope.SEED_TYPE_FQN,
 
     val formatJson: Boolean,
     val formatDdl: Boolean,

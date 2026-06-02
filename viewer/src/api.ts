@@ -17,6 +17,8 @@ import { GraphData, GraphNode } from "./types";
 export interface ErdRequest {
   scope: "all" | "seed";
   seed?: string;
+  /** seed 해석 방식: "fqn" (단일 엔티티, 기본) | "package" (패키지+하위 전체). */
+  seedType?: "fqn" | "package";
   depth?: number;
   level: 1 | 2 | 3;
   /** EXTENDS (상속/MappedSuperclass) 관계 표시 여부. 기본 true. */
