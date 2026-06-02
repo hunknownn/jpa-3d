@@ -6,12 +6,14 @@ import {
   INHERITANCE_COLOR, INHERITANCE_LABEL, KIND_COLOR, COLUMN_MARK, kindKey,
   RADIUS, FONT_MONO, controlButton
 } from "./theme";
+import { IconDirection, IconFit, IconReset } from "./Icons";
 
 interface Props {
   data: GraphData;
   width: number;
   height: number;
-  level: 1 | 2 | 3;
+  /** 컬럼 표시 여부 (관계는 항상 표시). */
+  showColumns: boolean;
   onNodeReseed: (n: GraphNode) => void;
   onNodeNavigate?: (n: GraphNode) => void;
   /** 검색 매칭 노드 id 집합. 비어있지 않으면 비매칭 노드/엣지를 페이드한다. */
@@ -107,7 +109,7 @@ export interface Erd2dHandle {
 }
 
 const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
-  data, width, height, level, onNodeReseed, onNodeNavigate,
+  data, width, height, showColumns, onNodeReseed, onNodeNavigate,
   highlightedIds, highlightBaseId
 }, ref) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -191,12 +193,12 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
   // elkjs 는 비동기 layout 이라 useEffect 로 계산
   useEffect(() => {
     const seq = ++layoutSeq.current;
-    computeElkLayout(data, level, rankdir).then((result) => {
+    computeElkLayout(data, showColumns, rankdir).then((result) => {
       // 도중에 다른 layout 요청이 들어왔다면 무시
       if (seq !== layoutSeq.current) return;
       setLayout(result);
     });
-  }, [data, level, rankdir]);
+  }, [data, showColumns, rankdir]);
 
   // 레이아웃이 바뀌면 자동으로 화면에 맞춤
   useEffect(() => {
@@ -406,7 +408,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                 node={n}
                 x={box.x + (off?.dx ?? 0)}
                 y={box.y + (off?.dy ?? 0)}
-                level={level}
+                showColumns={showColumns}
                 dimmed={dimmed}
                 onColumnHover={(hovering) => {
                   if (hovering) setHoverEntityId(n.id);
@@ -451,9 +453,10 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         <button
           style={zoomBtnStyle}
           onClick={() => setRankdir((d) => (d === "LR" ? "TB" : "LR"))}
-          title="방향 전환 (가로 ↔ 세로)"
+          title={`방향 전환 (현재 ${rankdir === "LR" ? "가로" : "세로"})`}
+          aria-label="레이아웃 방향 전환"
         >
-          {rankdir}
+          <IconDirection horizontal={rankdir === "LR"} />
         </button>
         <button style={zoomBtnStyle} title="축소" onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
         <span style={{
@@ -470,12 +473,13 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
             aria-label="위치 초기화"
             onClick={() => setNodeOffsets(new Map())}
           >
-            ↺
+            <IconReset />
           </button>
         )}
         <button
           style={zoomBtnStyle}
           title="전체 보기 (화면에 맞춤)"
+          aria-label="전체 보기"
           onClick={() => {
             const margin = 40;
             const scale = Math.min(
@@ -490,7 +494,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
             });
           }}
         >
-          fit
+          <IconFit />
         </button>
       </div>
     </div>
@@ -509,7 +513,10 @@ function Minimap({ layout, nodes, nodeOffsets, pan, zoom, viewW, viewH, onJump }
   onJump: (worldX: number, worldY: number) => void;
 }) {
   if (layout.width <= 0 || layout.height <= 0 || layout.nodes.size < 2) return null;
-  const MM_MAX = 168;
+  // 좁거나 낮은 도킹(left/right/bottom)에선 미니맵이 화면을 가리므로 숨긴다.
+  if (viewW < 380 || viewH < 320) return null;
+  // 미니맵 크기를 뷰 크기에 비례시켜 작은 창에서 과하게 커지지 않게.
+  const MM_MAX = Math.max(96, Math.min(168, Math.min(viewW, viewH) * 0.26));
   const s = Math.min(MM_MAX / layout.width, MM_MAX / layout.height);
   const mmW = layout.width * s;
   const mmH = layout.height * s;
@@ -597,9 +604,9 @@ function midPoint(points: { x: number; y: number }[]): { x: number; y: number } 
   return points[points.length - 1];
 }
 
-function cardHeight(n: GraphNode, level: 1 | 2 | 3): number {
+function cardHeight(n: GraphNode, showColumns: boolean): number {
   const inhExtra = n.entity?.inheritance ? INH_BAR_H : 0;
-  if (level < 2 || !n.entity || n.entity.columns.length === 0) return CARD_HEADER_H + inhExtra + 8;
+  if (!showColumns || !n.entity || n.entity.columns.length === 0) return CARD_HEADER_H + inhExtra + 8;
   return CARD_HEADER_H + inhExtra + n.entity.columns.length * ROW_H + 8;
 }
 
@@ -610,7 +617,7 @@ function cardHeight(n: GraphNode, level: 1 | 2 | 3): number {
  * - 엣지 경로는 `section.startPoint + bendPoints + endPoint` 로 폴리라인 구성.
  * - multi-edge 는 elkjs 가 자체 id 로 구분하므로 link 인덱스를 id 에 섞어 충돌 회피.
  */
-async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: RankDir): Promise<Layout> {
+async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: RankDir): Promise<Layout> {
   if (data.nodes.length === 0) return EMPTY_LAYOUT;
 
   const direction = rankdir === "LR" ? "RIGHT" : "DOWN";
@@ -618,7 +625,7 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
   const children: ElkNode[] = data.nodes.map((n) => ({
     id: n.id,
     width: CARD_W,
-    height: cardHeight(n, level)
+    height: cardHeight(n, showColumns)
   }));
 
   const nodeIds = new Set(data.nodes.map((n) => n.id));
@@ -700,8 +707,8 @@ async function computeElkLayout(data: GraphData, level: 1 | 2 | 3, rankdir: Rank
   };
 }
 
-function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumnHover }: {
-  node: GraphNode; x: number; y: number; level: 1 | 2 | 3;
+function EntityCard({ node, x, y, showColumns, dimmed, onReseed, onDragStart, onColumnHover }: {
+  node: GraphNode; x: number; y: number; showColumns: boolean;
   dimmed?: boolean;
   onReseed: () => void;
   onDragStart: (clientX: number, clientY: number) => void;
@@ -709,8 +716,8 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
 }) {
   const isEntity = node.entity != null;
   const headerBg = KIND_COLOR[kindKey(node.entity)];
-  const showColumns = level >= 2 && isEntity && node.entity!.columns.length > 0;
-  const h = cardHeight(node, level);
+  const hasColumns = showColumns && isEntity && node.entity!.columns.length > 0;
+  const h = cardHeight(node, showColumns);
 
   // 테이블명이 클래스명과 다른 entity 만 우측에 표 이름을 작게 부기.
   // Repository / 동명 테이블 entity 는 한 줄(이름) 만 표시.
@@ -763,7 +770,7 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
           )}
         </g>
       )}
-      {showColumns && node.entity!.columns.map((c, i) => (
+      {hasColumns && node.entity!.columns.map((c, i) => (
         <g
           key={c.fieldName}
           transform={`translate(0,${columnsY + i * ROW_H})`}

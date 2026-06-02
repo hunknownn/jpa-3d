@@ -5,10 +5,10 @@ import Legend from "./Legend";
 import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
 import { UI, RADIUS, controlButton } from "./theme";
+import { IconSync, IconSearch } from "./Icons";
 
 type Scope = "all" | "seed";
 type SeedType = "fqn" | "package";
-type Level = 1 | 2 | 3;
 type ViewMode = "3d" | "2d";
 
 interface ErdParams {
@@ -16,7 +16,10 @@ interface ErdParams {
   seed?: string;
   /** seed 해석 방식: 단일 엔티티(fqn) vs 패키지+하위(package). */
   seedType: SeedType;
-  level: Level;
+  /** 컬럼 표시 여부 (관계는 항상 표시). */
+  showColumns: boolean;
+  /** Repository 노드/USES_ENTITY 엣지 표시 여부 (컬럼과 독립 — "리포지토리만" 가능). */
+  showRepository: boolean;
   depth: number;
   view: ViewMode;
   showExtends: boolean;
@@ -30,21 +33,22 @@ function readParamsFromHash(): ErdParams {
   const qs = qIdx >= 0 ? hash.slice(qIdx + 1) : "";
   const p = new URLSearchParams(qs);
   const scope = (p.get("scope") === "seed" ? "seed" : "all") as Scope;
-  const lvlRaw = parseInt(p.get("level") ?? "1", 10);
-  const level: Level = lvlRaw === 2 ? 2 : lvlRaw === 3 ? 3 : 1;
+  const showColumns = p.get("col") === "1";
+  const showRepository = p.get("repo") === "1";
   const depth = parseInt(p.get("depth") ?? "2", 10);
   const seed = p.get("seed") ?? undefined;
   const seedType: SeedType = p.get("seedType") === "package" ? "package" : "fqn";
   const view: ViewMode = p.get("view") === "2d" ? "2d" : "3d";
   // showExtends 미지정이면 기본 true (기존 동작 유지)
   const showExtends = p.get("extends") !== "0";
-  return { scope, seed, seedType, level, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
+  return { scope, seed, seedType, showColumns, showRepository, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
 }
 
 function writeParamsToHash(params: ErdParams) {
   const p = new URLSearchParams();
   p.set("scope", params.scope);
-  p.set("level", String(params.level));
+  if (params.showColumns) p.set("col", "1");
+  if (params.showRepository) p.set("repo", "1");
   p.set("view", params.view);
   if (!params.showExtends) p.set("extends", "0");
   if (params.scope === "seed") {
@@ -77,6 +81,10 @@ export default function ErdApp() {
   const [suggests, setSuggests] = useState<GraphNode[]>([]);
   const [query, setQuery] = useState(params.seed ?? "");
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+  // 툴바는 좁은 폭에서 wrap 되어 높이가 가변 — 실제 높이를 측정해 그래프 영역 오프셋에 반영.
+  // (고정값을 쓰면 wrap 시 좌상단 뷰 토글이 둘째 줄에 가려진다.)
+  const [toolbarH, setToolbarH] = useState(TOOLBAR_H);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   // 검색 드롭다운: 키보드 탐색 인덱스 + 열림 상태
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -90,17 +98,10 @@ export default function ErdApp() {
   // plugin 측 ViewerSnapshot 가 window.__JPA3D_SNAPSHOT__/__JPA3D_VIEW_STATE__ 을 호출.
   useEffect(() => {
     const w = window as unknown as {
-      __JPA3D_VIEW_STATE__?: () => { mode: ViewMode; scope: Scope; seed: string; seedType: SeedType; depth: number };
+      __JPA3D_VIEW_STATE__?: () => { mode: ViewMode };
       __JPA3D_SNAPSHOT__?: (format: "png" | "svg") => Promise<{ format: string; data?: string; error?: string }>;
     };
-    // plugin(Export 다이얼로그)이 현재 뷰 상태를 읽어 seed/scope 를 prefill 한다.
-    w.__JPA3D_VIEW_STATE__ = () => ({
-      mode: params.view,
-      scope: params.scope,
-      seed: params.seed ?? "",
-      seedType: params.seedType,
-      depth: params.depth
-    });
+    w.__JPA3D_VIEW_STATE__ = () => ({ mode: params.view });
     w.__JPA3D_SNAPSHOT__ = async (format) => {
       try {
         if (params.view === "2d") {
@@ -123,13 +124,23 @@ export default function ErdApp() {
       delete w.__JPA3D_VIEW_STATE__;
       delete w.__JPA3D_SNAPSHOT__;
     };
-  }, [params]);
+  }, [params.view]);
 
   // 윈도우 리사이즈
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  // 툴바 높이 측정 (wrap 으로 줄 수가 바뀌면 갱신)
+  useEffect(() => {
+    const el = toolbarRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setToolbarH(el.offsetHeight));
+    ro.observe(el);
+    setToolbarH(el.offsetHeight);
+    return () => ro.disconnect();
   }, []);
 
   // URL ↔ state 동기화
@@ -150,7 +161,8 @@ export default function ErdApp() {
       seed: params.seed,
       seedType: params.seedType,
       depth: params.depth,
-      level: params.level,
+      showColumns: params.showColumns,
+      showRepository: params.showRepository,
       showExtends: params.showExtends
     })
       .then(setData)
@@ -280,7 +292,7 @@ export default function ErdApp() {
   return (
     <div style={{ position: "fixed", inset: 0, background: UI.canvas, color: UI.text }}>
       {/* 컨트롤 바 — 좁은 툴윈도우에서 줄바꿈되도록 wrap */}
-      <div style={{
+      <div ref={toolbarRef} style={{
         position: "absolute", top: 0, left: 0, right: 0, minHeight: TOOLBAR_H,
         display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10,
         padding: "4px 10px", rowGap: 6,
@@ -301,12 +313,21 @@ export default function ErdApp() {
             <Divider />
           </>
         )}
-        <LevelToggle value={params.level} onChange={(level) => setParams({ ...params, level })} />
-        <Divider />
-        <ExtendsToggle value={params.showExtends} onChange={(showExtends) => setParams({ ...params, showExtends })} />
+        <OptionsMenu
+          showColumns={params.showColumns}
+          showRepository={params.showRepository}
+          showExtends={params.showExtends}
+          onChange={(patch) => setParams({ ...params, ...patch })}
+        />
 
         {/* 검색 — 남는 공간을 차지하다가 좁아지면 다음 줄로 */}
         <div style={{ position: "relative", flex: "1 1 200px", minWidth: 160, maxWidth: 380 }}>
+          <span style={{
+            position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)",
+            color: UI.textMuted, pointerEvents: "none", display: "flex"
+          }}>
+            <IconSearch size={13} />
+          </span>
           <input
             value={query}
             role="combobox"
@@ -326,7 +347,7 @@ export default function ErdApp() {
                   : "중심 엔티티 검색…"
             }
             style={{
-              width: "100%", padding: "5px 26px 5px 8px", fontSize: 13,
+              width: "100%", padding: "5px 26px 5px 28px", fontSize: 13,
               background: UI.canvas, color: UI.text,
               border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.control
             }}
@@ -393,16 +414,15 @@ export default function ErdApp() {
           <button
             onClick={() => setRefreshTick((t) => t + 1)}
             disabled={loading}
-            title="현재 프로젝트 상태로 ERD 재분석"
+            title={loading ? "동기화 중…" : "현재 프로젝트 상태로 ERD 재분석"}
+            aria-label="동기화"
             style={{
               ...controlButton,
-              padding: "0 10px",
-              background: loading ? UI.border : "transparent",
               color: loading ? UI.textMuted : UI.textDim,
               cursor: loading ? "wait" : "pointer"
             }}
           >
-            {loading ? "동기화 중..." : "↻ 동기화"}
+            <IconSync spin={loading} />
           </button>
           <div style={{ color: UI.textMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
             {`노드 ${data.nodes.length} · 관계 ${data.links.length}`}
@@ -410,8 +430,8 @@ export default function ErdApp() {
         </div>
       </div>
 
-      {/* 그래프 영역 */}
-      <div style={{ position: "absolute", top: TOOLBAR_H, left: 0, right: 0, bottom: 0 }}>
+      {/* 그래프 영역 — 툴바 실제 높이만큼 내려 시작 (wrap 대응) */}
+      <div style={{ position: "absolute", top: toolbarH, left: 0, right: 0, bottom: 0 }}>
         {/* 뷰 모드(렌더 방식) — 데이터 필터와 성격이 달라 캔버스 좌상단에 분리 배치 */}
         <ViewModeControl value={params.view} onChange={(view) => setParams({ ...params, view })} />
         {isIndexing ? (
@@ -428,8 +448,8 @@ export default function ErdApp() {
               ref={erd2dRef}
               data={data}
               width={size.w}
-              height={size.h - TOOLBAR_H}
-              level={params.level}
+              height={size.h - toolbarH}
+              showColumns={params.showColumns}
               highlightedIds={highlightedIds}
               highlightBaseId={params.seed}
               onNodeReseed={(n) => pickSeed(n)}
@@ -443,8 +463,8 @@ export default function ErdApp() {
               ref={graphRef}
               data={data}
               width={size.w}
-              height={size.h - TOOLBAR_H}
-              level={params.level}
+              height={size.h - toolbarH}
+              showColumns={params.showColumns}
               highlightedIds={highlightedIds}
               highlightBaseId={params.seed}
               onNodeSelect={(n) => navigateToSource(n.id)}
@@ -455,7 +475,7 @@ export default function ErdApp() {
         )}
       </div>
 
-      {showHelp && <HelpPopover onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpPopover top={toolbarH + 6} onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
@@ -528,28 +548,81 @@ function SeedTypeToggle({ value, onChange }: { value: SeedType; onChange: (v: Se
   );
 }
 
-function LevelToggle({ value, onChange }: { value: Level; onChange: (v: Level) => void }) {
-  return (
-    <div style={groupStyle}>
-      <span style={labelStyle}>표시:</span>
-      <SegGroup>
-        <SegItem first active={value === 1} onClick={() => onChange(1)}>관계만</SegItem>
-        <SegItem active={value === 2} onClick={() => onChange(2)}>+컬럼</SegItem>
-        <SegItem active={value === 3} onClick={() => onChange(3)}>+리포지토리</SegItem>
-      </SegGroup>
-    </div>
-  );
-}
+interface DisplayOptions { showColumns: boolean; showRepository: boolean; showExtends: boolean }
 
-function ExtendsToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+/**
+ * "표시 옵션" 드롭다운 — 관계는 항상 표시되는 기본값이고, 컬럼/리포지토리/상속을
+ * 각각 독립적으로 켜고 끈다(다중 선택). IntelliJ Database 툴윈도우의 표시 옵션 메뉴와 같은 패턴.
+ */
+function OptionsMenu({ showColumns, showRepository, showExtends, onChange }: {
+  showColumns: boolean; showRepository: boolean; showExtends: boolean;
+  onChange: (patch: Partial<DisplayOptions>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const activeCount = [showColumns, showRepository, showExtends].filter(Boolean).length;
+
+  const items: { key: keyof DisplayOptions; label: string; hint: string; checked: boolean }[] = [
+    { key: "showColumns", label: "컬럼", hint: "엔티티 컬럼/타입", checked: showColumns },
+    { key: "showRepository", label: "리포지토리", hint: "Spring Data Repository", checked: showRepository },
+    { key: "showExtends", label: "상속", hint: "@MappedSuperclass / EXTENDS", checked: showExtends }
+  ];
+
   return (
-    <div style={groupStyle}>
-      <span style={labelStyle}>상속:</span>
-      <SegGroup>
-        <SegItem first active={value} onClick={() => onChange(!value)} title="상속 / @MappedSuperclass 관계 표시">
-          {value ? "ON" : "OFF"}
-        </SegItem>
-      </SegGroup>
+    <div style={{ ...groupStyle, position: "relative" }}>
+      <span style={labelStyle}>표시:</span>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title="표시 옵션"
+        style={{
+          ...controlButton, gap: 6,
+          background: open ? UI.panelHover : "transparent"
+        }}
+      >
+        관계 + {activeCount}
+        <span style={{ fontSize: 9, color: UI.textMuted }}>{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          {/* 바깥 클릭 닫기 */}
+          <div style={{ position: "fixed", inset: 0, zIndex: 39 }} onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            style={{
+              position: "absolute", top: "calc(100% + 4px)", left: 0, minWidth: 220, zIndex: 40,
+              background: UI.panel, border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.container,
+              padding: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.45)"
+            }}
+          >
+            <div style={{ padding: "4px 10px", fontSize: 11, color: UI.textMuted }}>
+              관계는 항상 표시됩니다
+            </div>
+            {items.map((it) => (
+              <button
+                key={it.key}
+                role="menuitemcheckbox"
+                aria-checked={it.checked}
+                onClick={() => onChange({ [it.key]: !it.checked })}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "6px 10px", background: "transparent", border: "none",
+                  borderRadius: RADIUS.control, cursor: "pointer", textAlign: "left",
+                  color: UI.text, fontSize: 12
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = UI.panelHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ width: 14, color: it.checked ? UI.accent : UI.textMuted }}>
+                  {it.checked ? "✓" : ""}
+                </span>
+                <span style={{ flex: 1 }}>{it.label}</span>
+                <span style={{ color: UI.textMuted, fontSize: 11 }}>{it.hint}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -583,7 +656,7 @@ function HelpButton({ open, onToggle }: { open: boolean; onToggle: () => void })
   );
 }
 
-function HelpPopover({ onClose }: { onClose: () => void }) {
+function HelpPopover({ onClose, top }: { onClose: () => void; top: number }) {
   const rows: [string, string][] = [
     ["클릭", "엔티티의 소스 파일로 이동"],
     ["우클릭", "그 노드를 중심(seed)으로 다시 탐색"],
@@ -601,7 +674,7 @@ function HelpPopover({ onClose }: { onClose: () => void }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          position: "absolute", top: TOOLBAR_H + 6, right: 12, width: 320,
+          position: "absolute", top, right: 12, width: 320,
           background: UI.panel, color: UI.text,
           border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.container,
           padding: "12px 14px", fontSize: 12, lineHeight: 1.5,

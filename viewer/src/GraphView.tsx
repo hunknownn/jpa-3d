@@ -7,6 +7,7 @@ import {
   INHERITANCE_COLOR, INHERITANCE_LABEL, KIND_COLOR, COLUMN_MARK, hexToRgba, kindKey,
   FONT_MONO, controlButton, RADIUS
 } from "./theme";
+import { IconFit } from "./Icons";
 
 export interface GraphHandle {
   zoomIn(): void;
@@ -27,8 +28,8 @@ interface Props {
   highlightedIds?: Set<string>;
   /** 하이라이트의 기준이 된 노드 — highlightedIds 가 활성일 때 항상 포함됨 */
   highlightBaseId?: string;
-  /** 표시 디테일. 1=이름만 / 2=+컬럼 / 3=+Repository. 카드 sprite 의 컬럼 영역에 영향. */
-  level?: 1 | 2 | 3;
+  /** 컬럼 표시 여부 — 카드 sprite 의 컬럼 영역에 영향. */
+  showColumns?: boolean;
   width: number;
   height: number;
   /** 좌클릭을 PAN 으로 (기본 ROTATE). 데모 데이터로 평면 그래프 보일 때 유용. */
@@ -66,8 +67,8 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
-  const cols = (level >= 2 && n.entity?.columns) ? n.entity.columns : [];
+function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite {
+  const cols = (showColumns && n.entity?.columns) ? n.entity.columns : [];
   const inh = n.entity?.inheritance;
   const inhH = inh ? CARD_INH_H : 0;
   const colsAreaH = cols.length ? cols.length * CARD_ROW_H + 8 : 8;
@@ -245,7 +246,7 @@ function makeLinkLabelSprite(text: string, color: string): THREE.Sprite {
   return sprite;
 }
 
-function makeEntityCardObject(n: GraphNode, level: 1 | 2 | 3): THREE.Group {
+function makeEntityCardObject(n: GraphNode, showColumns: boolean): THREE.Group {
   const group = new THREE.Group();
 
   // 3D anchor — Phong 으로 두면 ForceGraph3D 기본 조명 아래 음영이 생겨 회전 시 깊이감.
@@ -259,7 +260,7 @@ function makeEntityCardObject(n: GraphNode, level: 1 | 2 | 3): THREE.Group {
   group.add(sphere);
 
   // 카드 라벨 — sphere 상단 위로 띄움. sprite.position 은 sprite 중심 기준.
-  const sprite = makeEntityCardSprite(n, level);
+  const sprite = makeEntityCardSprite(n, showColumns);
   const cardWorldH = sprite.scale.y;
   sprite.position.y = ANCHOR_RADIUS + ANCHOR_TO_CARD_GAP + cardWorldH / 2;
   group.add(sprite);
@@ -281,7 +282,7 @@ function setGroupOpacity(group: THREE.Group, opacity: number) {
 const DIM_COLOR = "#1f2937";
 
 const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
-  { data, onNodeSelect, onNodeReseed, highlightedIds, highlightBaseId, level = 1, width, height, grabMode },
+  { data, onNodeSelect, onNodeReseed, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
   ref
 ) {
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
@@ -358,10 +359,10 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     return typeof end === "string" ? end : (end?.id ?? "");
   }
 
-  // level 변경 시 ForceGraph 가 nodeThreeObject 를 다시 호출하도록 리프레시
+  // 컬럼 표시 변경 시 ForceGraph 가 nodeThreeObject 를 다시 호출하도록 리프레시
   useEffect(() => {
     fgRef.current?.refresh?.();
-  }, [level]);
+  }, [showColumns]);
 
   return (
     <div style={{ position: "relative", width, height }}>
@@ -418,7 +419,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         nodeThreeObjectExtend={false}
         nodeThreeObject={((n: any) => {
           const node = n as GraphNode;
-          const obj = makeEntityCardObject(node, level);
+          const obj = makeEntityCardObject(node, showColumns);
           if (hlActive && !isHighlighted(node.id)) {
             setGroupOpacity(obj, 0.18);
           }
@@ -433,7 +434,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
       }}>
         <button style={ctrlBtnStyle} title="축소" onClick={() => zoomBy(1.25)}>−</button>
         <button style={ctrlBtnStyle} title="확대" onClick={() => zoomBy(0.8)}>+</button>
-        <button style={ctrlBtnStyle} title="전체 보기 (화면에 맞춤)" onClick={() => fgRef.current?.zoomToFit(400, 80)}>fit</button>
+        <button style={ctrlBtnStyle} title="전체 보기 (화면에 맞춤)" aria-label="전체 보기" onClick={() => fgRef.current?.zoomToFit(400, 80)}><IconFit /></button>
       </div>
     </div>
   );

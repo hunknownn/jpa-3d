@@ -4,6 +4,7 @@ import {
   KIND_COLOR, KIND_LABEL,
   INHERITANCE_COLOR, INHERITANCE_LABEL, COLUMN_MARK, RADIUS
 } from "./theme";
+import { IconLegend } from "./Icons";
 import { Relation } from "./types";
 
 // 화면에 실제로 나타나는 관계만, 의미 순서대로.
@@ -33,7 +34,7 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
           display: "flex", alignItems: "center", gap: 6
         }}
       >
-        <span style={{ fontSize: 13 }}>{open ? "▾" : "▸"}</span> 범례
+        <IconLegend size={13} /> 범례
       </button>
 
       {open && (

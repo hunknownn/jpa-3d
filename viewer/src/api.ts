@@ -20,7 +20,10 @@ export interface ErdRequest {
   /** seed 해석 방식: "fqn" (단일 엔티티, 기본) | "package" (패키지+하위 전체). */
   seedType?: "fqn" | "package";
   depth?: number;
-  level: 1 | 2 | 3;
+  /** 컬럼 표시 여부 (관계는 항상 표시). 기본 false. */
+  showColumns?: boolean;
+  /** Repository 노드/USES_ENTITY 엣지 표시 여부 (컬럼과 독립). 기본 false. */
+  showRepository?: boolean;
   /** EXTENDS (상속/MappedSuperclass) 관계 표시 여부. 기본 true. */
   showExtends?: boolean;
 }
