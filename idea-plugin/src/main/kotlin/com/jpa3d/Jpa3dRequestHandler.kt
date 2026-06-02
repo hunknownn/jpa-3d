@@ -58,12 +58,13 @@ class Jpa3dRequestHandler(private val project: Project) {
      *  - seed: scope=seed 일 때 BFS 시작점 (seedType 에 따라 FQN 또는 패키지)
      *  - seedType: "fqn" (기본) | "package"
      *  - depth: BFS 깊이 (scope=seed 일 때만)
-     *  - level: 1 (관계만) / 2 (+컬럼) / 3 (+Repository)
+     *  - showColumns: 컬럼 표시 여부 (관계는 항상 표시되는 기본값)
+     *  - showRepository: Repository 노드/USES_ENTITY 엣지 표시 여부 (컬럼과 독립)
      *
      * 필터링 순서:
-     *  1. level<3 이면 Repository 노드와 USES_ENTITY 엣지 제거
+     *  1. showRepository=false 면 Repository 노드와 USES_ENTITY 엣지 제거
      *  2. scope=seed 면 seed(들)에서 BFS 로 depth 단계까지 도달 가능한 노드만 유지
-     *  3. level<2 이면 entity 의 컬럼을 비움 (entity 메타는 유지해 카드 헤더 색은 보존)
+     *  3. showColumns=false 면 entity 의 컬럼을 비움 (entity 메타는 유지해 카드 헤더 색은 보존)
      *  4. 양 끝 노드가 살아남은 엣지만 유지
      */
     private fun handleErd(args: Map<String, Any?>?): String {
@@ -75,11 +76,13 @@ class Jpa3dRequestHandler(private val project: Project) {
         val seed = args?.get("seed") as? String
         val seedType = (args?.get("seedType") as? String) ?: GraphScope.SEED_TYPE_FQN
         val depth = (args?.get("depth") as? Number)?.toInt() ?: 2
-        val level = (args?.get("level") as? Number)?.toInt()?.coerceIn(1, 3) ?: 1
+        // 관계는 기본 표시. 컬럼/리포지토리는 각각 독립 토글 (둘 다 기본 false).
+        val showColumns = (args?.get("showColumns") as? Boolean) ?: false
+        val showRepository = (args?.get("showRepository") as? Boolean) ?: false
         val showExtends = (args?.get("showExtends") as? Boolean) ?: true
 
         val graph = project.service<Jpa3dAnalysisCache>().getGraphData()
-        val filtered = filterGraph(graph, scope, seed, seedType, depth, level, showExtends)
+        val filtered = filterGraph(graph, scope, seed, seedType, depth, showColumns, showRepository, showExtends)
         return mapper.writeValueAsString(filtered)
     }
 
@@ -89,12 +92,13 @@ class Jpa3dRequestHandler(private val project: Project) {
         seed: String?,
         seedType: String,
         depth: Int,
-        level: Int,
+        showColumns: Boolean,
+        showRepository: Boolean,
         showExtends: Boolean
     ): GraphData {
-        // 1) level<3 면 Repository 노드/엣지 제거
-        var nodes = if (level < 3) g.nodes.filter { it.entity != null } else g.nodes
-        var links = if (level < 3) g.links.filter { it.relation != Relation.USES_ENTITY } else g.links
+        // 1) Repository 표시 안 하면 Repository 노드/USES_ENTITY 엣지 제거
+        var nodes = if (!showRepository) g.nodes.filter { it.entity != null } else g.nodes
+        var links = if (!showRepository) g.links.filter { it.relation != Relation.USES_ENTITY } else g.links
 
         // 1-1) 상속 끄면 EXTENDS 엣지 제거. MappedSuperclass 노드는 그 결과로 고립되면
         // 자동으로 시각화에서 외톨이가 되긴 하지만, 일관성을 위해 함께 제거.
@@ -114,8 +118,8 @@ class Jpa3dRequestHandler(private val project: Project) {
             nodes = nodes.filter { it.id in reachable }
         }
 
-        // 3) level<2 면 컬럼 제거 (entity 메타는 유지 — 카드 색/테이블명 등)
-        if (level < 2) {
+        // 3) 컬럼 표시 안 하면 컬럼 제거 (entity 메타는 유지 — 카드 색/테이블명 등)
+        if (!showColumns) {
             nodes = nodes.map { n ->
                 val e = n.entity
                 if (e == null) n else n.copy(entity = e.copy(columns = emptyList()))

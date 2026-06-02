@@ -81,28 +81,27 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         setOKButtonText("Export")
         init()
 
+        // 방언 콤보 + DDL 옵션은 DDL 체크가 켜진 경우만, seed 입력은 '현재 뷰' 범위일 때만 활성화.
+        val refreshEnabled = {
+            dialectCombo.isEnabled = cbDdl.isSelected
+            cbSnakeCase.isEnabled = cbDdl.isSelected
+            cbDropExisting.isEnabled = cbDdl.isSelected
+            val curr = rbCurrent.isSelected
+            seedTypeCombo.isEnabled = curr
+            seedField.isEnabled = curr
+            depthSpinner.isEnabled = curr
+        }
         cbDdl.addActionListener { refreshEnabled() }
         rbAll.addActionListener { refreshEnabled() }
         rbCurrent.addActionListener { refreshEnabled() }
         refreshEnabled()
 
-        // viewer 현재 뷰 상태를 백그라운드에서 조회 → 3D 면 SVG 비활성화 + seed prefill.
-        // 조회 실패 시(viewer 미준비 등) 기본값 유지.
-        probeViewState()
+        // viewer 현재 뷰 모드를 백그라운드에서 조회 → 3D 면 SVG 스냅샷 비활성화.
+        // 조회 실패 시(viewer 미준비 등) 둘 다 활성 상태 유지하고 실행 시 에러로 안내.
+        probeViewMode()
     }
 
-    // 방언 콤보 + DDL 옵션은 DDL 체크가 켜진 경우만, seed 입력은 '현재 뷰' 범위일 때만 활성화.
-    private fun refreshEnabled() {
-        dialectCombo.isEnabled = cbDdl.isSelected
-        cbSnakeCase.isEnabled = cbDdl.isSelected
-        cbDropExisting.isEnabled = cbDdl.isSelected
-        val curr = rbCurrent.isSelected
-        seedTypeCombo.isEnabled = curr
-        seedField.isEnabled = curr
-        depthSpinner.isEnabled = curr
-    }
-
-    private fun probeViewState() {
+    private fun probeViewMode() {
         val browser = project.service<Jpa3dBrowserHolder>().browser ?: run {
             cbSnapshotPng.isEnabled = false
             cbSnapshotSvg.isEnabled = false
@@ -111,22 +110,12 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
             return
         }
         ApplicationManager.getApplication().executeOnPooledThread {
-            val state = ViewerSnapshot(browser).queryViewState()
+            val mode = ViewerSnapshot(browser).queryViewMode()
             ApplicationManager.getApplication().invokeLater {
-                if (state == null) return@invokeLater
-                if (state.mode == "3d") {
+                if (mode == "3d") {
                     cbSnapshotSvg.isSelected = false
                     cbSnapshotSvg.isEnabled = false
                     cbSnapshotSvg.text = "SVG (3D 뷰에선 미지원)"
-                }
-                // viewer 가 중심(seed) 모드로 보고 있으면 그 seed/타입/depth 를 채우고
-                // '현재 뷰' 범위를 기본 선택 — 보던 화면을 그대로 export 하는 흐름.
-                if (state.scope == "seed" && !state.seed.isNullOrBlank()) {
-                    seedField.text = state.seed
-                    seedTypeCombo.selectedIndex = if (state.seedType == GraphScope.SEED_TYPE_PACKAGE) 1 else 0
-                    state.depth?.let { depthSpinner.value = it.coerceIn(0, 10) }
-                    rbCurrent.isSelected = true
-                    refreshEnabled()
                 }
             }
         }
