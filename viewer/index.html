@@ -3,10 +3,20 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DepScope</title>
+    <title>JPA 3D</title>
     <style>
       html, body, #root { margin: 0; padding: 0; height: 100%; background: #0b1020; color: #ddd;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      button { font-family: inherit; }
+      /* 키보드 탐색 시에만 포커스 링 — 마우스 클릭에는 표시 안 함 */
+      :focus-visible { outline: 2px solid #3b82f6; outline-offset: 1px; border-radius: 4px; }
+      :focus:not(:focus-visible) { outline: none; }
+      /* 다크 테마에 맞춘 스크롤바 (드롭다운/범례 등) */
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: #0f172a; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 5px; }
+      ::-webkit-scrollbar-thumb:hover { background: #475569; }
     </style>
   </head>
   <body>

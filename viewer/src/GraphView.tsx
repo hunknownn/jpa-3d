@@ -1,7 +1,12 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
 import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
-import { GraphData, GraphLink, GraphNode, Relation } from "./types";
+import { GraphData, GraphLink, GraphNode } from "./types";
+import {
+  UI, RELATION_COLOR, RELATION_LABEL,
+  INHERITANCE_COLOR, INHERITANCE_LABEL, KIND_COLOR, COLUMN_MARK, hexToRgba, kindKey,
+  FONT_MONO, controlButton, RADIUS
+} from "./theme";
 
 export interface GraphHandle {
   zoomIn(): void;
@@ -14,16 +19,6 @@ export interface GraphHandle {
    */
   snapshotPng(): string;
 }
-
-const RELATION_COLOR: Record<Relation, string> = {
-  EXTENDS: "#ff7b7b",
-  IMPLEMENTS: "#ffb86b",
-  ONE_TO_MANY: "#10b981",
-  MANY_TO_ONE: "#14b8a6",
-  ONE_TO_ONE: "#06b6d4",
-  MANY_TO_MANY: "#6366f1",
-  USES_ENTITY: "#eab308"
-};
 
 interface Props {
   data: GraphData;
@@ -52,17 +47,9 @@ const CARD_HEADER_H = 32;
 const CARD_INH_H = 18;
 const CARD_ROW_H = 20;
 const CARD_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-
-const INHERITANCE_COLOR_3D: Record<string, string> = {
-  SINGLE_TABLE: "#92400e",
-  JOINED: "#6d28d9",
-  TABLE_PER_CLASS: "#0e7490"
-};
-const INHERITANCE_LABEL_3D: Record<string, string> = {
-  SINGLE_TABLE: "SINGLE",
-  JOINED: "JOINED",
-  TABLE_PER_CLASS: "TPC"
-};
+// 컬럼명/타입은 코드 식별자 — mono 로 그려 세로 정렬과 코드 친화 인상을 준다.
+const CARD_MONO = FONT_MONO;
+const COL_INDENT = 26; // PK/FK 배지 영역 폭(고정) — mono 라 정렬이 일정
 
 function shortType3d(t: string): string {
   const i = t.lastIndexOf(".");
@@ -104,12 +91,7 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
 
   // 헤더 색 (kind 별). 본체보다 살짝만 진하게 (alpha 0.88) — 위계 유지하면서 비침은 살림.
   const isEntity = n.entity != null;
-  const isMappedSuper = n.entity?.kind === "mappedSuperclass";
-  const isEmbeddable = n.entity?.kind === "embeddable";
-  const headerBg = isMappedSuper ? "rgba(55, 48, 163, 0.88)"
-    : isEmbeddable ? "rgba(15, 118, 110, 0.88)"
-    : isEntity ? "rgba(29, 78, 216, 0.88)"
-    : "rgba(31, 133, 86, 0.88)";
+  const headerBg = hexToRgba(KIND_COLOR[kindKey(n.entity)], 0.88);
 
   ctx.save();
   ctx.beginPath();
@@ -146,8 +128,8 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
 
   // 상속 배지
   if (inh) {
-    const inhColor = INHERITANCE_COLOR_3D[inh.strategy] ?? "#475569";
-    const inhLabel = INHERITANCE_LABEL_3D[inh.strategy] ?? inh.strategy;
+    const inhColor = INHERITANCE_COLOR[inh.strategy] ?? UI.borderStrong;
+    const inhLabel = INHERITANCE_LABEL[inh.strategy] ?? inh.strategy;
     ctx.fillStyle = inhColor;
     ctx.globalAlpha = 0.85;
     ctx.fillRect(0, CARD_HEADER_H, CARD_W, CARD_INH_H);
@@ -168,29 +150,35 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
   const colsStartY = CARD_HEADER_H + inhH;
   cols.forEach((c, i) => {
     const y = colsStartY + i * CARD_ROW_H + CARD_ROW_H / 2;
-    ctx.fillStyle = c.primaryKey ? "#fbbf24" : c.foreignKey ? "#7dd3fc" : "#e2e8f0";
-    ctx.font = `12px ${CARD_FONT}`;
+    // PK/FK 색상 텍스트 배지 (이모지 대신) — 고정폭 영역 뒤에 이름을 정렬.
     ctx.textAlign = "left";
-    const namePrefix = c.primaryKey ? "🔑 " : c.foreignKey ? "🔗 " : "";
-    ctx.fillText(namePrefix + (c.columnName ?? c.fieldName), 12, y);
+    const badge = c.primaryKey ? "PK" : c.foreignKey ? "FK" : "";
+    if (badge) {
+      ctx.font = `700 11px ${CARD_MONO}`;
+      ctx.fillStyle = c.primaryKey ? COLUMN_MARK.pk : COLUMN_MARK.fk;
+      ctx.fillText(badge, 12, y);
+    }
+    ctx.font = `12px ${CARD_MONO}`;
+    ctx.fillStyle = UI.text;
+    ctx.fillText(c.columnName ?? c.fieldName, 12 + COL_INDENT, y);
 
     // 우측: [unique ◆][indexed #] type[* if not nullable]. 오른쪽부터 거꾸로 그려 측정한 너비만큼 좌측으로 이동.
-    ctx.font = `11px ${CARD_FONT}`;
+    ctx.font = `11px ${CARD_MONO}`;
     ctx.textAlign = "right";
     let rx = CARD_W - 12;
     const typeStr = shortType3d(c.javaType) + (c.nullable ? "" : "*");
-    ctx.fillStyle = "#94a3b8";
+    ctx.fillStyle = UI.textMuted;
     ctx.fillText(typeStr, rx, y);
     rx -= ctx.measureText(typeStr).width;
     if (c.indexed) {
       const s = "# ";
-      ctx.fillStyle = "#67e8f9";
+      ctx.fillStyle = COLUMN_MARK.indexed;
       ctx.fillText(s, rx, y);
       rx -= ctx.measureText(s).width;
     }
     if (c.unique) {
       const s = "◆ ";
-      ctx.fillStyle = "#fde047";
+      ctx.fillStyle = COLUMN_MARK.unique;
       ctx.fillText(s, rx, y);
     }
   });
@@ -218,16 +206,43 @@ function makeEntityCardSprite(n: GraphNode, level: 1 | 2 | 3): THREE.Sprite {
 const ANCHOR_RADIUS = 3;
 const ANCHOR_TO_CARD_GAP = 5;
 
-const ANCHOR_COLOR: Record<string, number> = {
-  entity: 0x3b82f6,           // blue
-  mappedSuperclass: 0x6366f1, // indigo
-  embeddable: 0x14b8a6,       // teal
-  repository: 0x22c55e        // green (entity == null)
-};
+// anchor sphere 색은 카드 헤더(KIND_COLOR)와 동일 — 범례 한 장으로 둘 다 설명된다.
+function anchorColorFor(n: GraphNode): string {
+  return KIND_COLOR[kindKey(n.entity)];
+}
 
-function anchorColorFor(n: GraphNode): number {
-  if (n.entity == null) return ANCHOR_COLOR.repository;
-  return ANCHOR_COLOR[n.entity.kind] ?? ANCHOR_COLOR.entity;
+/**
+ * 엣지 위에 띄우는 관계 라벨 sprite (예: "1:N").
+ * 색상만으로 관계를 구분하지 못하는 사용자를 위한 보조 단서.
+ * depthTest=false 로 항상 위에 보이게 한다.
+ */
+function makeLinkLabelSprite(text: string, color: string): THREE.Sprite {
+  const fontSize = 32;
+  const pad = 6;
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = `bold ${fontSize}px ${CARD_FONT}`;
+  const w = Math.ceil(ctx.measureText(text).width) + pad * 2;
+  const h = fontSize + pad * 2;
+  canvas.width = w;
+  canvas.height = h;
+  // canvas 리사이즈로 컨텍스트가 초기화되므로 폰트 재설정
+  ctx.font = `bold ${fontSize}px ${CARD_FONT}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = "rgba(11,16,32,0.92)";
+  ctx.lineWidth = 6;
+  ctx.strokeText(text, w / 2, h / 2);
+  ctx.fillStyle = color;
+  ctx.fillText(text, w / 2, h / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  const scale = 0.18;
+  sprite.scale.set(w * scale, h * scale, 1);
+  return sprite;
 }
 
 function makeEntityCardObject(n: GraphNode, level: 1 | 2 | 3): THREE.Group {
@@ -349,51 +364,81 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
   }, [level]);
 
   return (
-    <ForceGraph3D
-      ref={fgRef}
-      width={width}
-      height={height}
-      graphData={graphData}
-      backgroundColor="#0b1020"
-      nodeLabel={(n: any) => `<div style="padding:4px 8px;background:#111827;border-radius:4px">
-        <b>${(n as GraphNode).name}</b><br/>
-        <span style="color:#9aa5b1">${(n as GraphNode).pkg}</span><br/>
-        <span style="color:#9aa5b1">${(n as GraphNode).kind}${
-          (n as GraphNode).stereotypes?.length ? " · @" + (n as GraphNode).stereotypes.join(", @") : ""
-        }</span>
-      </div>`}
-      linkColor={(l: any) => {
-        const link = l as GraphLink;
-        const base = RELATION_COLOR[link.relation] ?? "#666";
-        if (!hlActive) return base;
-        const s = linkEndpointId((l as any).source);
-        const t = linkEndpointId((l as any).target);
-        return (isHighlighted(s) || isHighlighted(t)) ? base : DIM_COLOR;
-      }}
-      linkOpacity={hlActive ? 0.25 : 0.6}
-      linkDirectionalArrowLength={3}
-      linkDirectionalArrowRelPos={1}
+    <div style={{ position: "relative", width, height }}>
+      <ForceGraph3D
+        ref={fgRef}
+        width={width}
+        height={height}
+        graphData={graphData}
+        backgroundColor={UI.canvas3d}
+        nodeLabel={(n: any) => `<div style="padding:4px 8px;background:#111827;border-radius:4px">
+          <b>${(n as GraphNode).name}</b><br/>
+          <span style="color:#9aa5b1">${(n as GraphNode).pkg}</span><br/>
+          <span style="color:#9aa5b1">${(n as GraphNode).kind}${
+            (n as GraphNode).stereotypes?.length ? " · @" + (n as GraphNode).stereotypes.join(", @") : ""
+          }</span>
+        </div>`}
+        linkColor={(l: any) => {
+          const link = l as GraphLink;
+          const base = RELATION_COLOR[link.relation] ?? "#666";
+          if (!hlActive) return base;
+          const s = linkEndpointId((l as any).source);
+          const t = linkEndpointId((l as any).target);
+          return (isHighlighted(s) || isHighlighted(t)) ? base : DIM_COLOR;
+        }}
+        linkOpacity={hlActive ? 0.25 : 0.6}
+        linkDirectionalArrowLength={3}
+        linkDirectionalArrowRelPos={1}
 
-      onNodeClick={(n: any) => onNodeSelect(n as GraphNode)}
-      onNodeRightClick={(n: any) => onNodeReseed(n as GraphNode)}
-      // 좌클릭: 소스로 점프 / 우클릭: 그 노드를 새 seed 로
-      // 노드 수동 드래그 비활성 — 카드 sprite 가 화면을 많이 덮어 드래그가
-      // 회전 대신 노드 끌기로 잡혀버리는 문제 회피. 배치는 force 시뮬레이션에 일임.
-      enableNodeDrag={false}
+        // 엣지 중점에 관계 라벨(1:N 등) sprite — 색각 보조 단서.
+        linkThreeObjectExtend={true}
+        linkThreeObject={((l: any) => {
+          const rel = (l as GraphLink).relation;
+          return makeLinkLabelSprite(RELATION_LABEL[rel] ?? rel, RELATION_COLOR[rel] ?? "#aaa");
+        }) as any}
+        linkPositionUpdate={((sprite: any, { start, end }: any) => {
+          if (!sprite) return;
+          sprite.position.set(
+            (start.x + end.x) / 2,
+            (start.y + end.y) / 2,
+            (start.z + end.z) / 2
+          );
+        }) as any}
 
-      // 노드를 (3D anchor sphere + 카드 sprite 라벨) Group 으로 치환.
-      // sphere 는 회전/원근에 반응하는 진짜 3D 객체라 깊이 단서 제공,
-      // 카드는 그 위에 떠 있는 빌보드 라벨로 가독성 유지.
-      nodeThreeObjectExtend={false}
-      nodeThreeObject={((n: any) => {
-        const node = n as GraphNode;
-        const obj = makeEntityCardObject(node, level);
-        if (hlActive && !isHighlighted(node.id)) {
-          setGroupOpacity(obj, 0.18);
-        }
-        return obj;
-      }) as any}/>
+        onNodeClick={(n: any) => onNodeSelect(n as GraphNode)}
+        onNodeRightClick={(n: any) => onNodeReseed(n as GraphNode)}
+        // 좌클릭: 소스로 점프 / 우클릭: 그 노드를 새 seed 로
+        // 노드 수동 드래그 비활성 — 카드 sprite 가 화면을 많이 덮어 드래그가
+        // 회전 대신 노드 끌기로 잡혀버리는 문제 회피. 배치는 force 시뮬레이션에 일임.
+        enableNodeDrag={false}
+
+        // 노드를 (3D anchor sphere + 카드 sprite 라벨) Group 으로 치환.
+        // sphere 는 회전/원근에 반응하는 진짜 3D 객체라 깊이 단서 제공,
+        // 카드는 그 위에 떠 있는 빌보드 라벨로 가독성 유지.
+        nodeThreeObjectExtend={false}
+        nodeThreeObject={((n: any) => {
+          const node = n as GraphNode;
+          const obj = makeEntityCardObject(node, level);
+          if (hlActive && !isHighlighted(node.id)) {
+            setGroupOpacity(obj, 0.18);
+          }
+          return obj;
+        }) as any}/>
+
+      {/* 화면 컨트롤 — 2D 뷰와 동일 위치/스타일로 줌·맞춤 제공. */}
+      <div style={{
+        position: "absolute", bottom: 16, right: 16,
+        display: "flex", gap: 4, background: UI.panel, padding: 4,
+        borderRadius: RADIUS.control, border: `1px solid ${UI.border}`
+      }}>
+        <button style={ctrlBtnStyle} title="축소" onClick={() => zoomBy(1.25)}>−</button>
+        <button style={ctrlBtnStyle} title="확대" onClick={() => zoomBy(0.8)}>+</button>
+        <button style={ctrlBtnStyle} title="전체 보기 (화면에 맞춤)" onClick={() => fgRef.current?.zoomToFit(400, 80)}>fit</button>
+      </div>
+    </div>
   );
 });
+
+const ctrlBtnStyle: React.CSSProperties = controlButton;
 
 export default GraphView;

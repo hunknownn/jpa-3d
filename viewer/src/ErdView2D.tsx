@@ -1,6 +1,11 @@
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ELK, { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk.bundled.js";
 import { GraphData, GraphLink, GraphNode, Relation } from "./types";
+import {
+  UI, RELATION_COLOR, RELATION_LABEL, RELATION_DASH,
+  INHERITANCE_COLOR, INHERITANCE_LABEL, KIND_COLOR, COLUMN_MARK, kindKey,
+  RADIUS, FONT_MONO, controlButton
+} from "./theme";
 
 interface Props {
   data: GraphData;
@@ -14,15 +19,6 @@ interface Props {
   /** 하이라이트 기준 노드(보통 현재 seed) — 항상 매칭으로 간주된다. */
   highlightBaseId?: string;
 }
-
-const RELATION_LABEL: Partial<Record<Relation, string>> = {
-  ONE_TO_MANY: "1:N",
-  MANY_TO_ONE: "N:1",
-  ONE_TO_ONE: "1:1",
-  MANY_TO_MANY: "M:N",
-  EXTENDS: "extends",
-  USES_ENTITY: "uses"
-};
 
 /**
  * Crow's foot 표기:
@@ -61,31 +57,10 @@ function targetMarker(rel: Relation): string | null {
   }
 }
 
-const RELATION_COLOR: Partial<Record<Relation, string>> = {
-  ONE_TO_MANY: "#10b981",
-  MANY_TO_ONE: "#14b8a6",
-  ONE_TO_ONE: "#06b6d4",
-  MANY_TO_MANY: "#6366f1",
-  EXTENDS: "#ff7b7b",
-  USES_ENTITY: "#eab308"
-};
-
 const CARD_W = 260;
 const CARD_HEADER_H = 32;
 const INH_BAR_H = 18;
-const ROW_H = 20;
-
-const INHERITANCE_COLOR: Record<string, string> = {
-  SINGLE_TABLE: "#92400e",   // amber-800
-  JOINED: "#6d28d9",         // violet-700
-  TABLE_PER_CLASS: "#0e7490" // cyan-700
-};
-
-const INHERITANCE_LABEL: Record<string, string> = {
-  SINGLE_TABLE: "SINGLE",
-  JOINED: "JOINED",
-  TABLE_PER_CLASS: "TPC"
-};
+const ROW_H = 22;
 
 type RankDir = "LR" | "TB";
 
@@ -241,7 +216,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
 
   return (
     <div
-      style={{ position: "absolute", inset: 0, overflow: "hidden", background: "#0f172a", cursor: dragging ? "grabbing" : "grab" }}
+      style={{ position: "absolute", inset: 0, overflow: "hidden", background: UI.canvas, cursor: dragging ? "grabbing" : "grab" }}
       onMouseDown={(e) => {
         // 노드 드래그가 stopPropagation 으로 막아주지 않는 빈 캔버스에서만 팬 시작
         if (nodeDragRef.current) return;
@@ -337,7 +312,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
             const key = linkKey(l, i);
             const path = layout.edges.get(key);
             if (!path || path.points.length < 2) return null;
-            const color = RELATION_COLOR[l.relation] ?? "#94a3b8";
+            const color = RELATION_COLOR[l.relation] ?? UI.textMuted;
             const isHover = hoverEdge === key;
             // 두 가지 페이드 사유:
             //  1) 검색 하이라이트 비활성 노드 사이 엣지
@@ -361,6 +336,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
               <g
                 key={key}
                 opacity={edgeHl ? 1 : 0.15}
+                style={{ transition: "opacity 0.15s ease" }}
                 onMouseEnter={() => setHoverEdge(key)}
                 onMouseLeave={() => setHoverEdge((h) => (h === key ? null : h))}
               >
@@ -369,6 +345,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   fill="none"
                   stroke={color}
                   strokeWidth={isHover ? 2.5 : 1.5}
+                  strokeDasharray={RELATION_DASH[l.relation]}
                   opacity={0.85}
                   markerStart={(() => {
                     const m = sourceMarker(l.relation);
@@ -385,7 +362,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   fill={color}
                   fontSize={11}
                   textAnchor="middle"
-                  stroke="#0f172a"
+                  stroke={UI.canvas}
                   strokeWidth={3}
                   paintOrder="stroke"
                 >
@@ -395,10 +372,10 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   <text
                     x={labelPoint.x}
                     y={labelPoint.y + 10}
-                    fill="#cbd5e1"
+                    fill={UI.textDim}
                     fontSize={10}
                     textAnchor="middle"
-                    stroke="#0f172a"
+                    stroke={UI.canvas}
                     strokeWidth={3}
                     paintOrder="stroke"
                   >
@@ -453,20 +430,39 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         </g>
       </svg>
 
+      {/* 미니맵 — 전체 그래프 축소도 + 현재 보이는 영역 표시. 클릭으로 해당 지점으로 이동. */}
+      <Minimap
+        layout={layout}
+        nodes={data.nodes}
+        nodeOffsets={nodeOffsets}
+        pan={pan}
+        zoom={zoom}
+        viewW={width}
+        viewH={height}
+        onJump={(wx, wy) => setPan({ x: width / 2 - wx * zoom, y: height / 2 - wy * zoom })}
+      />
+
       {/* 컨트롤 */}
       <div style={{
         position: "absolute", bottom: 16, right: 16,
-        display: "flex", gap: 4, background: "#1e293b", padding: 4, borderRadius: 4
+        display: "flex", alignItems: "center", gap: 4,
+        background: UI.panel, padding: 4, borderRadius: RADIUS.control, border: `1px solid ${UI.border}`
       }}>
         <button
           style={zoomBtnStyle}
           onClick={() => setRankdir((d) => (d === "LR" ? "TB" : "LR"))}
-          title="방향 전환 (LR ↔ TB)"
+          title="방향 전환 (가로 ↔ 세로)"
         >
           {rankdir}
         </button>
-        <button style={zoomBtnStyle} onClick={() => setZoom((z) => Math.min(3, z * 1.2))}>+</button>
-        <button style={zoomBtnStyle} onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
+        <button style={zoomBtnStyle} title="축소" onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
+        <span style={{
+          minWidth: 44, textAlign: "center", fontSize: 11, color: UI.textMuted,
+          fontVariantNumeric: "tabular-nums"
+        }}>
+          {Math.round(zoom * 100)}%
+        </span>
+        <button style={zoomBtnStyle} title="확대" onClick={() => setZoom((z) => Math.min(3, z * 1.2))}>+</button>
         {nodeOffsets.size > 0 && (
           <button
             style={zoomBtnStyle}
@@ -478,6 +474,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         )}
         <button
           style={zoomBtnStyle}
+          title="전체 보기 (화면에 맞춤)"
           onClick={() => {
             const margin = 40;
             const scale = Math.min(
@@ -498,6 +495,69 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
     </div>
   );
 });
+
+/** 우상단 미니맵. 노드 박스를 축소해 그리고, 현재 보이는 영역을 사각형으로 오버레이. */
+function Minimap({ layout, nodes, nodeOffsets, pan, zoom, viewW, viewH, onJump }: {
+  layout: Layout;
+  nodes: GraphNode[];
+  nodeOffsets: Map<string, NodeOffset>;
+  pan: { x: number; y: number };
+  zoom: number;
+  viewW: number;
+  viewH: number;
+  onJump: (worldX: number, worldY: number) => void;
+}) {
+  if (layout.width <= 0 || layout.height <= 0 || layout.nodes.size < 2) return null;
+  const MM_MAX = 168;
+  const s = Math.min(MM_MAX / layout.width, MM_MAX / layout.height);
+  const mmW = layout.width * s;
+  const mmH = layout.height * s;
+
+  // 현재 화면에 보이는 world 영역
+  const vx = (-pan.x / zoom) * s;
+  const vy = (-pan.y / zoom) * s;
+  const vw = (viewW / zoom) * s;
+  const vh = (viewH / zoom) * s;
+
+  return (
+    <div style={{
+      position: "absolute", top: 16, right: 16,
+      background: UI.panel, border: `1px solid ${UI.border}`, borderRadius: RADIUS.control, padding: 4
+    }}>
+      <svg
+        width={mmW} height={mmH}
+        style={{ display: "block", cursor: "pointer" }}
+        onMouseDown={(e) => {
+          const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+          onJump((e.clientX - rect.left) / s, (e.clientY - rect.top) / s);
+        }}
+      >
+        {nodes.map((n) => {
+          const box = layout.nodes.get(n.id);
+          if (!box) return null;
+          const off = nodeOffsets.get(n.id);
+          return (
+            <rect
+              key={n.id}
+              x={(box.x + (off?.dx ?? 0)) * s}
+              y={(box.y + (off?.dy ?? 0)) * s}
+              width={box.w * s}
+              height={box.h * s}
+              fill={KIND_COLOR[kindKey(n.entity)]}
+              opacity={0.8}
+              rx={1}
+            />
+          );
+        })}
+        <rect
+          x={vx} y={vy} width={vw} height={vh}
+          fill="rgba(59,130,246,0.15)"
+          stroke={UI.accent} strokeWidth={1}
+        />
+      </svg>
+    </div>
+  );
+}
 
 export default ErdView2D;
 
@@ -647,9 +707,7 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
   onColumnHover?: (hovering: boolean) => void;
 }) {
   const isEntity = node.entity != null;
-  const isMappedSuper = node.entity?.kind === "mappedSuperclass";
-  const isEmbeddable = node.entity?.kind === "embeddable";
-  const headerBg = isMappedSuper ? "#3730a3" : isEmbeddable ? "#0f766e" : isEntity ? "#1d4ed8" : "#475569";
+  const headerBg = KIND_COLOR[kindKey(node.entity)];
   const showColumns = level >= 2 && isEntity && node.entity!.columns.length > 0;
   const h = cardHeight(node, level);
 
@@ -659,7 +717,7 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
   const showTableBadge = isEntity && tableName != null && tableName.toLowerCase() !== node.name.toLowerCase();
 
   const inh = node.entity?.inheritance;
-  const inhColor = inh ? (INHERITANCE_COLOR[inh.strategy] ?? "#475569") : null;
+  const inhColor = inh ? (INHERITANCE_COLOR[inh.strategy] ?? UI.borderStrong) : null;
   const inhLabel = inh ? (INHERITANCE_LABEL[inh.strategy] ?? inh.strategy) : null;
   const columnsY = CARD_HEADER_H + (inh ? INH_BAR_H : 0);
 
@@ -672,17 +730,17 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
         onDragStart(e.clientX, e.clientY);
       }}
       onContextMenu={(e) => { e.preventDefault(); onReseed(); }}
-      style={{ cursor: "grab" }}
+      style={{ cursor: "grab", transition: "opacity 0.15s ease" }}
     >
-      <rect width={CARD_W} height={h} rx={6} fill="#1e293b" stroke="#334155" />
-      <rect width={CARD_W} height={CARD_HEADER_H} rx={6} fill={headerBg} />
-      <text x={12} y={CARD_HEADER_H / 2 + 5} fill="#f1f5f9" fontSize={15} fontWeight={600}>
+      <rect width={CARD_W} height={h} rx={RADIUS.control} fill={UI.panel} stroke={UI.border} strokeWidth={1.5} />
+      <rect width={CARD_W} height={CARD_HEADER_H} rx={RADIUS.control} fill={headerBg} />
+      <text x={12} y={CARD_HEADER_H / 2 + 5} fill={UI.textBright} fontSize={15} fontWeight={600}>
         {node.name}
       </text>
       {showTableBadge && (
         <text
           x={CARD_W - 12} y={CARD_HEADER_H / 2 + 4}
-          fill="#cbd5e1" fontSize={11} textAnchor="end" fontStyle="italic"
+          fill={UI.textDim} fontSize={11} textAnchor="end" fontStyle="italic"
         >
           {tableName}
         </text>
@@ -713,21 +771,25 @@ function EntityCard({ node, x, y, level, dimmed, onReseed, onDragStart, onColumn
         >
           {/* 투명 hit area — 글자 사이 빈 공간에서도 hover 가 끊기지 않게 */}
           <rect x={0} y={0} width={CARD_W} height={ROW_H} fill="transparent" />
-          <text
-            x={12} y={15} fontSize={12}
-            fill={c.primaryKey ? "#fbbf24" : c.foreignKey ? "#7dd3fc" : "#e2e8f0"}
-          >
-            {c.primaryKey ? "🔑 " : c.foreignKey ? "🔗 " : ""}{c.columnName ?? c.fieldName}
+          {/* 컬럼명 — mono 로 세로 정렬. PK/FK 는 색상 텍스트 배지(이모지 대신). */}
+          <text x={12} y={16} fontSize={12} fontFamily={FONT_MONO}>
+            <tspan
+              fontWeight={700}
+              fill={c.primaryKey ? COLUMN_MARK.pk : c.foreignKey ? COLUMN_MARK.fk : UI.textMuted}
+            >
+              {c.primaryKey ? "PK" : c.foreignKey ? "FK" : "  "}
+            </tspan>
+            <tspan dx={8} fill={UI.text}>{c.columnName ?? c.fieldName}</tspan>
           </text>
           {/*
             우측 우편함: [unique ◆] [indexed #] type[* if not nullable]
             - ◆ : @Column(unique) 또는 @Table(uniqueConstraints) 에 포함
             - # : @Table(indexes) 의 columnList 에 포함 (PK 의 자동 index 는 제외)
           */}
-          <text x={CARD_W - 12} y={15} fontSize={11} textAnchor="end">
-            {c.unique && <tspan fill="#fde047">◆ </tspan>}
-            {c.indexed && <tspan fill="#67e8f9"># </tspan>}
-            <tspan fill="#94a3b8">{shortType(c.javaType)}{c.nullable ? "" : "*"}</tspan>
+          <text x={CARD_W - 12} y={16} fontSize={11} textAnchor="end" fontFamily={FONT_MONO}>
+            {c.unique && <tspan fill={COLUMN_MARK.unique}>◆ </tspan>}
+            {c.indexed && <tspan fill={COLUMN_MARK.indexed}># </tspan>}
+            <tspan fill={UI.textMuted}>{shortType(c.javaType)}{c.nullable ? "" : "*"}</tspan>
           </text>
         </g>
       ))}
@@ -740,8 +802,4 @@ function shortType(t: string): string {
   return i < 0 ? t : t.slice(i + 1);
 }
 
-const zoomBtnStyle: React.CSSProperties = {
-  minWidth: 28, height: 28, fontSize: 12, padding: "0 6px",
-  background: "transparent", color: "#cbd5e1",
-  border: "1px solid #475569", borderRadius: 4, cursor: "pointer"
-};
+const zoomBtnStyle: React.CSSProperties = controlButton;
