@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from "react";
 import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { GraphData, GraphLink, GraphNode } from "./types";
@@ -559,23 +559,33 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     }
   }
 
-  // 줌(카메라-타깃 거리)을 그대로 유지한 채, 시점만 새 중심(root) 노드로 옮긴다.
-  // reseed 는 새 그래프라 좌표가 전부 바뀌므로 카메라를 그대로 두면 빈 공간을 보게 된다 →
-  // 배율은 보존하고 새 중심을 같은 거리에서 바라보게 재배치한다.
-  function recenterOnRoot(fg: any) {
-    const node = graphData.nodes.find((n) => n.id === rootId) as any;
-    if (!node || node.x == null) { fg.zoomToFit(500, 100); return; }
+  // 줌(카메라-타깃 거리)을 그대로 유지한 채, 시점만 지정 노드로 옮긴다.
+  // - reseed: 새 그래프라 좌표가 전부 바뀌므로 카메라를 그대로 두면 빈 공간을 본다 → 새 중심으로(트윈).
+  // - 미니맵 클릭: 멀리 떨어진(연결 끊긴) 노드로 이동. animate=false 로 즉시 팬한다.
+  //   (cameraPosition 의 600ms 트윈 중 사용자가 좌클릭 회전을 시작하면 TrackballControls 상태가
+  //    꼬여 회전이 깨진다. 카메라·타깃을 같은 델타로 평행이동하면 _eye(상대벡터)가 보존돼 안전.)
+  function recenterOn(nodeId: string | undefined, animate = true) {
+    const fg = fgRef.current as any;
+    if (!fg) return;
+    const node = graphData.nodes.find((n) => n.id === nodeId) as any;
+    if (!node || node.x == null) { fg.zoomToFit?.(500, 100); return; }
     const cam = fg.camera();
     const controls = fg.controls?.();
     const oldTarget: THREE.Vector3 = controls?.target ?? new THREE.Vector3(0, 0, 0);
-    const dist = cam.position.distanceTo(oldTarget) || 200;
-    const dir = new THREE.Vector3(
-      cam.position.x - oldTarget.x, cam.position.y - oldTarget.y, cam.position.z - oldTarget.z
-    );
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
-    dir.normalize().multiplyScalar(dist);
-    const target = { x: node.x, y: node.y, z: node.z };
-    fg.cameraPosition({ x: target.x + dir.x, y: target.y + dir.y, z: target.z + dir.z }, target, 600);
+    const target = new THREE.Vector3(node.x, node.y, node.z);
+    if (animate) {
+      const dir = new THREE.Vector3().subVectors(cam.position, oldTarget);
+      if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+      fg.cameraPosition(
+        { x: target.x + dir.x, y: target.y + dir.y, z: target.z + dir.z }, target, 600
+      );
+    } else {
+      // 즉시 팬 — 카메라와 타깃을 동일 델타로 평행이동 + controls.update().
+      const delta = new THREE.Vector3().subVectors(target, oldTarget);
+      cam.position.add(delta);
+      controls?.target?.add?.(delta);
+      controls?.update?.();
+    }
   }
 
   // 시뮬레이션이 안정화되면 그때 한 번만 카메라를 조정한다(가드로 사용자의 줌 보존).
@@ -586,7 +596,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     if (fitModeRef.current === "fit") {
       fg.zoomToFit(500, 100);
     } else {
-      recenterOnRoot(fg);
+      recenterOn(rootId);
     }
     applyFog(fg);
   }
@@ -695,6 +705,9 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
           return obj;
         }) as any}/>
 
+      {/* 미니맵 — 전체 노드를 x/y 평면(층 구조 보존)에 투영 + 현재 뷰 박스. 클릭 시 줌 유지한 채 이동. */}
+      <Minimap3D fgRef={fgRef} nodes={graphData.nodes as any} viewW={width} viewH={height} onJump={(id) => recenterOn(id, false)} />
+
       {/* 화면 컨트롤 — 2D 뷰와 동일 위치/스타일로 줌·맞춤 제공. */}
       <div style={{
         position: "absolute", bottom: 16, right: 16,
@@ -708,6 +721,108 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     </div>
   );
 });
+
+// === 3D 미니맵 ===
+//
+// 3D 는 줌인하면 멀리(특히 연결 끊긴) 노드를 화면에서 놓치기 쉽다. 전체 노드를 월드 x/y 평면
+// (y=층 이라 깊이 구조가 세로로 보존)에 투영해 작은 레이더로 그리고, 현재 카메라가 보는 영역을
+// 사각형으로 겹쳐 표시한다. 점을 클릭하면 가장 가까운 노드로 (현재 줌을 유지한 채) 이동한다.
+interface MiniNode { id: string; x: number; y: number; color: string }
+function Minimap3D({ fgRef, nodes, viewW, viewH, onJump }: {
+  fgRef: React.MutableRefObject<ForceGraphMethods | undefined>;
+  nodes: GraphNode[];
+  viewW: number;
+  viewH: number;
+  onJump: (nodeId: string) => void;
+}) {
+  // 카메라 이동/노드 정착을 반영하기 위해 주기적으로 다시 그린다(작은 SVG라 가벼움).
+  const [, force] = useReducer((c: number) => c + 1, 0);
+  useEffect(() => {
+    const id = window.setInterval(() => force(), 120);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // 좁거나 낮은 도킹(left/right/bottom)에선 미니맵이 화면을 가리므로 숨긴다.
+  if (viewW < 380 || viewH < 320) return null;
+  const fg = fgRef.current as any;
+  if (!fg) return null;
+
+  const pts: MiniNode[] = [];
+  for (const n of nodes) {
+    const nx = (n as any).x, ny = (n as any).y;
+    if (typeof nx !== "number" || typeof ny !== "number") continue;
+    pts.push({ id: n.id, x: nx, y: ny, color: KIND_COLOR[kindKey(n.entity)] });
+  }
+  if (pts.length < 2) return null;
+
+  // 현재 카메라가 보는 영역(월드 x/y) 추정: 타깃 중심, 크기 = 2·dist·tan(fov/2).
+  let view: { cx: number; cy: number; hw: number; hh: number } | null = null;
+  try {
+    const cam = fg.camera();
+    const controls = fg.controls?.();
+    const target = controls?.target;
+    if (cam && target) {
+      const dist = cam.position.distanceTo(target);
+      const fov = ((cam.fov ?? 50) * Math.PI) / 180;
+      const hh = Math.tan(fov / 2) * dist;
+      view = { cx: target.x, cy: target.y, hw: hh * (viewW / viewH), hh };
+    }
+  } catch { /* 카메라 미준비 — 뷰 박스 생략 */ }
+
+  // 노드 + 뷰 박스를 모두 포함하는 bbox.
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }
+  if (view) {
+    minX = Math.min(minX, view.cx - view.hw); maxX = Math.max(maxX, view.cx + view.hw);
+    minY = Math.min(minY, view.cy - view.hh); maxY = Math.max(maxY, view.cy + view.hh);
+  }
+  const spanX = (maxX - minX) || 1;
+  const spanY = (maxY - minY) || 1;
+  const MM_MAX = Math.max(96, Math.min(168, Math.min(viewW, viewH) * 0.26));
+  const s = MM_MAX / Math.max(spanX, spanY);
+  const mmW = spanX * s;
+  const mmH = spanY * s;
+  // 월드 → SVG. y 는 위가 +y 라 반전(루트=y0 가 위로).
+  const sx = (wx: number) => (wx - minX) * s;
+  const sy = (wy: number) => (maxY - wy) * s;
+
+  return (
+    <div style={{
+      position: "absolute", top: 16, right: 16,
+      background: UI.panel, border: `1px solid ${UI.border}`, borderRadius: RADIUS.control, padding: 4
+    }}>
+      <svg
+        width={mmW} height={mmH}
+        style={{ display: "block", cursor: "pointer" }}
+        onMouseDown={(e) => {
+          const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+          const wx = minX + (e.clientX - rect.left) / s;
+          const wy = maxY - (e.clientY - rect.top) / s;
+          let best: MiniNode | null = null, bd = Infinity;
+          for (const p of pts) {
+            const d = (p.x - wx) ** 2 + (p.y - wy) ** 2;
+            if (d < bd) { bd = d; best = p; }
+          }
+          if (best) onJump(best.id);
+        }}
+      >
+        {view && (
+          <rect
+            x={sx(view.cx - view.hw)} y={sy(view.cy + view.hh)}
+            width={view.hw * 2 * s} height={view.hh * 2 * s}
+            fill="rgba(139,92,246,0.14)" stroke={UI.accent} strokeWidth={1}
+          />
+        )}
+        {pts.map((p) => (
+          <circle key={p.id} cx={sx(p.x)} cy={sy(p.y)} r={2.6} fill={p.color} opacity={0.9} />
+        ))}
+      </svg>
+    </div>
+  );
+}
 
 const ctrlBtnStyle: React.CSSProperties = controlButton;
 
