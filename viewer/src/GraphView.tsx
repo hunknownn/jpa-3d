@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { GraphData, GraphLink, GraphNode } from "./types";
@@ -23,12 +23,13 @@ export interface GraphHandle {
 
 interface Props {
   data: GraphData;
+  /** 더블클릭 — 소스 파일로 이동(2D 와 의미 동일). 단일 클릭은 카메라 포커스라 여기로 오지 않는다. */
   onNodeSelect: (n: GraphNode) => void;
   onNodeReseed: (n: GraphNode) => void;
   highlightedIds?: Set<string>;
   /** 하이라이트의 기준이 된 노드 — highlightedIds 가 활성일 때 항상 포함됨 */
   highlightBaseId?: string;
-  /** 컬럼 표시 여부 — 카드 sprite 의 컬럼 영역에 영향. */
+  /** 컬럼 표시 여부 — 가까이서 볼 때 펼쳐지는 상세 카드의 컬럼 영역에 영향. */
   showColumns?: boolean;
   width: number;
   height: number;
@@ -36,21 +37,32 @@ interface Props {
   grabMode?: boolean;
 }
 
-// === 3D 카드 sprite ===
+// === 레이아웃 상수 ===
 //
-// 노드를 평범한 sphere 가 아니라, 2D 뷰의 EntityCard 와 비슷한 형태(이름/상속 배지/컬럼)
-// 로 보이는 canvas 텍스처 sprite 로 렌더한다. sprite 는 항상 카메라 빌보드라
-// 어느 각도에서 봐도 가독성을 유지한다.
+// 깊이(층)에 의미를 부여한다: 루트(중심/최다연결)에서의 BFS 거리를 수직 층으로 매핑.
+// Y 만 핀 고정하고 x/z 는 force 시뮬레이션에 맡겨 평면 내에서 자연스럽게 퍼지게 한다.
+// 회전(orbit)하면 "중심에서 몇 홉" 이 수직 위치로 즉시 읽힌다.
+const LAYER_GAP = 92;     // 층 간 수직 간격(world)
+const BOX_SIZE = 11;      // 노드 3D 베이스 박스 한 변
+const CARD_GAP = 6;       // 박스 상단 ↔ 카드 하단 여백
 
+// 거리 LOD — 카메라가 LOD_NEAR 보다 가까운 노드만 상세 카드(컬럼)를 펼치고,
+// 그보다 멀면 이름만 있는 compact 라벨을 보여준다. (per-frame onBeforeRender 로 판정)
+const LOD_NEAR = 150;
+// 좌클릭 포커스 시 카메라가 노드에서 떨어질 거리
+const FOCUS_DIST = 82;
+
+// === 카드(상세) 렌더 상수 ===
 const CARD_DPR = 2;
 const CARD_W = 260;
 const CARD_HEADER_H = 32;
 const CARD_INH_H = 18;
 const CARD_ROW_H = 20;
 const CARD_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-// 컬럼명/타입은 코드 식별자 — mono 로 그려 세로 정렬과 코드 친화 인상을 준다.
 const CARD_MONO = FONT_MONO;
-const COL_INDENT = 26; // PK/FK 배지 영역 폭(고정) — mono 라 정렬이 일정
+const COL_INDENT = 26;
+const DETAIL_WORLD_SCALE = 0.2;
+const COMPACT_WORLD_SCALE = 0.16;
 
 function shortType3d(t: string): string {
   const i = t.lastIndexOf(".");
@@ -67,8 +79,58 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite {
-  const cols = (showColumns && n.entity?.columns) ? n.entity.columns : [];
+// === compact 라벨 sprite (멀리서 항상 보이는 이름 칩) ===
+// 좌측에 kind 색 막대 + 이름. 작고 가벼워 멀리서도 어지럽지 않다.
+function makeCompactLabelSprite(n: GraphNode): THREE.Sprite {
+  const name = n.name;
+  const kindColor = KIND_COLOR[kindKey(n.entity)];
+  const fontSize = 26;
+  const padX = 13;
+  const barW = 7;
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d")!;
+  ctx.font = `600 ${fontSize}px ${CARD_FONT}`;
+  const textW = Math.ceil(ctx.measureText(name).width);
+  const w = barW + padX + textW + padX;
+  const h = fontSize + 16;
+
+  canvas.width = w * CARD_DPR;
+  canvas.height = h * CARD_DPR;
+  ctx.scale(CARD_DPR, CARD_DPR);
+
+  ctx.fillStyle = "rgba(30, 41, 59, 0.92)";
+  roundRect(ctx, 0, 0, w, h, 8);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(71, 85, 105, 0.9)";
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+
+  // 좌측 kind 색 막대 (둥근 좌변 안에 클리핑)
+  ctx.save();
+  roundRect(ctx, 0, 0, w, h, 8);
+  ctx.clip();
+  ctx.fillStyle = kindColor;
+  ctx.fillRect(0, 0, barW, h);
+  ctx.restore();
+
+  ctx.fillStyle = "#f1f5f9";
+  ctx.font = `600 ${fontSize}px ${CARD_FONT}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  ctx.fillText(name, barW + padX, h / 2 + 1);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(w * COMPACT_WORLD_SCALE, h * COMPACT_WORLD_SCALE, 1);
+  return sprite;
+}
+
+// === 상세 카드 sprite (가까이서 펼쳐지는 풀 카드: 이름/상속/컬럼) ===
+function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
+  const cols = n.entity?.columns ?? [];
   const inh = n.entity?.inheritance;
   const inhH = inh ? CARD_INH_H : 0;
   const colsAreaH = cols.length ? cols.length * CARD_ROW_H + 8 : 8;
@@ -80,19 +142,15 @@ function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite 
   const ctx = canvas.getContext("2d")!;
   ctx.scale(CARD_DPR, CARD_DPR);
 
-  // 본체 — rgba 로 반투명 채움. SpriteMaterial transparent=true 옵션은 텍스처의 알파를
-  // 살리겠다는 의미일 뿐이라, 보이는 투명도는 여기 fill alpha 가 결정.
-  // 텍스트는 그대로 불투명으로 그릴 것이라 가독성은 유지된다.
-  ctx.fillStyle = "rgba(30, 41, 59, 0.82)";
+  ctx.fillStyle = "rgba(30, 41, 59, 0.9)";
   roundRect(ctx, 0, 0, CARD_W, cardH, 6);
   ctx.fill();
-  ctx.strokeStyle = "rgba(51, 65, 85, 0.9)";
+  ctx.strokeStyle = "rgba(71, 85, 105, 0.95)";
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  // 헤더 색 (kind 별). 본체보다 살짝만 진하게 (alpha 0.88) — 위계 유지하면서 비침은 살림.
   const isEntity = n.entity != null;
-  const headerBg = hexToRgba(KIND_COLOR[kindKey(n.entity)], 0.88);
+  const headerBg = hexToRgba(KIND_COLOR[kindKey(n.entity)], 0.92);
 
   ctx.save();
   ctx.beginPath();
@@ -120,14 +178,12 @@ function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite 
     ctx.textAlign = "right";
     ctx.fillText(tableName, CARD_W - 12, CARD_HEADER_H / 2);
   } else if (!isEntity) {
-    // Repository: 우측에 작게 "Repository" 부기
     ctx.fillStyle = "rgba(255,255,255,0.7)";
     ctx.font = `italic 10px ${CARD_FONT}`;
     ctx.textAlign = "right";
     ctx.fillText("Repository", CARD_W - 12, CARD_HEADER_H / 2);
   }
 
-  // 상속 배지
   if (inh) {
     const inhColor = INHERITANCE_COLOR[inh.strategy] ?? UI.borderStrong;
     const inhLabel = INHERITANCE_LABEL[inh.strategy] ?? inh.strategy;
@@ -147,11 +203,9 @@ function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite 
     }
   }
 
-  // 컬럼
   const colsStartY = CARD_HEADER_H + inhH;
   cols.forEach((c, i) => {
     const y = colsStartY + i * CARD_ROW_H + CARD_ROW_H / 2;
-    // PK/FK 색상 텍스트 배지 (이모지 대신) — 고정폭 영역 뒤에 이름을 정렬.
     ctx.textAlign = "left";
     const badge = c.primaryKey ? "PK" : c.foreignKey ? "FK" : "";
     if (badge) {
@@ -163,7 +217,6 @@ function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite 
     ctx.fillStyle = UI.text;
     ctx.fillText(c.columnName ?? c.fieldName, 12 + COL_INDENT, y);
 
-    // 우측: [unique ◆][indexed #] type[* if not nullable]. 오른쪽부터 거꾸로 그려 측정한 너비만큼 좌측으로 이동.
     ctx.font = `11px ${CARD_MONO}`;
     ctx.textAlign = "right";
     let rx = CARD_W - 12;
@@ -186,37 +239,13 @@ function makeEntityCardSprite(n: GraphNode, showColumns: boolean): THREE.Sprite 
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthWrite: false
-  });
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
   const sprite = new THREE.Sprite(material);
-  // 월드 스케일 — 카드가 ~50 unit 정도 폭이 되도록
-  const worldScale = 0.22;
-  sprite.scale.set(CARD_W * worldScale, cardH * worldScale, 1);
+  sprite.scale.set(CARD_W * DETAIL_WORLD_SCALE, cardH * DETAIL_WORLD_SCALE, 1);
   return sprite;
 }
 
-// === 3D anchor + 카드 라벨 묶음 ===
-//
-// 노드 원점에 작은 3D sphere 를 둬서 회전·원근에 진짜 반응하는 깊이 단서를 제공한다.
-// 카드 sprite 는 sphere 위로 띄워 라벨처럼 동작 (여전히 빌보드, 항상 가독성 유지).
-// 엣지는 node origin = sphere 위치로 모임.
-
-const ANCHOR_RADIUS = 3;
-const ANCHOR_TO_CARD_GAP = 5;
-
-// anchor sphere 색은 카드 헤더(KIND_COLOR)와 동일 — 범례 한 장으로 둘 다 설명된다.
-function anchorColorFor(n: GraphNode): string {
-  return KIND_COLOR[kindKey(n.entity)];
-}
-
-/**
- * 엣지 위에 띄우는 관계 라벨 sprite (예: "1:N").
- * 색상만으로 관계를 구분하지 못하는 사용자를 위한 보조 단서.
- * depthTest=false 로 항상 위에 보이게 한다.
- */
+// 엣지에 띄우는 관계 라벨 sprite (예: "1:N"). 포커스/강조된 엣지에만 생성한다.
 function makeLinkLabelSprite(text: string, color: string): THREE.Sprite {
   const fontSize = 32;
   const pad = 6;
@@ -227,7 +256,6 @@ function makeLinkLabelSprite(text: string, color: string): THREE.Sprite {
   const h = fontSize + pad * 2;
   canvas.width = w;
   canvas.height = h;
-  // canvas 리사이즈로 컨텍스트가 초기화되므로 폰트 재설정
   ctx.font = `bold ${fontSize}px ${CARD_FONT}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -246,29 +274,54 @@ function makeLinkLabelSprite(text: string, color: string): THREE.Sprite {
   return sprite;
 }
 
+// 노드 = 3D 베이스 박스(깊이 단서) + compact/detail 카드(빌보드, 거리 LOD).
+const _tmpV = new THREE.Vector3();
 function makeEntityCardObject(n: GraphNode, showColumns: boolean): THREE.Group {
   const group = new THREE.Group();
 
-  // 3D anchor — Phong 으로 두면 ForceGraph3D 기본 조명 아래 음영이 생겨 회전 시 깊이감.
-  const sphereGeo = new THREE.SphereGeometry(ANCHOR_RADIUS, 18, 18);
-  const sphereMat = new THREE.MeshPhongMaterial({
-    color: anchorColorFor(n),
-    shininess: 40,
+  // 3D 베이스 박스 — 조명/회전에 반응해 깊이감을 준다. 엣지는 이 박스 중심으로 모인다.
+  const boxGeo = new THREE.BoxGeometry(BOX_SIZE, BOX_SIZE, BOX_SIZE);
+  const boxMat = new THREE.MeshPhongMaterial({
+    color: KIND_COLOR[kindKey(n.entity)],
+    shininess: 30,
     transparent: true
   });
-  const sphere = new THREE.Mesh(sphereGeo, sphereMat);
-  group.add(sphere);
+  const box = new THREE.Mesh(boxGeo, boxMat);
+  group.add(box);
 
-  // 카드 라벨 — sphere 상단 위로 띄움. sprite.position 은 sprite 중심 기준.
-  const sprite = makeEntityCardSprite(n, showColumns);
-  const cardWorldH = sprite.scale.y;
-  sprite.position.y = ANCHOR_RADIUS + ANCHOR_TO_CARD_GAP + cardWorldH / 2;
-  group.add(sprite);
+  const baseY = BOX_SIZE / 2 + CARD_GAP;
+
+  // compact 칩 — 항상 후보. 카드가 펼쳐지면 가려지므로 숨긴다.
+  const compact = makeCompactLabelSprite(n);
+  compact.position.y = baseY + compact.scale.y / 2;
+  group.add(compact);
+
+  // detail 카드 — showColumns 켜졌을 때만 만들고, 가까울 때만 표시.
+  let detail: THREE.Sprite | null = null;
+  if (showColumns) {
+    detail = makeEntityCardSprite(n);
+    detail.position.y = baseY + detail.scale.y / 2;
+    detail.visible = false;
+    group.add(detail);
+  }
+
+  // 거리 LOD — 박스는 항상 렌더되므로 그 onBeforeRender 에서 카메라 거리를 재
+  // compact ↔ detail 가시성을 매 프레임 토글한다.
+  box.onBeforeRender = (_r, _s, camera) => {
+    box.getWorldPosition(_tmpV);
+    const near = (camera as THREE.Camera).position.distanceTo(_tmpV) < LOD_NEAR;
+    if (detail) {
+      detail.visible = near;
+      compact.visible = !near;
+    } else {
+      compact.visible = true;
+    }
+  };
 
   return group;
 }
 
-/** Group 의 모든 머티리얼에 opacity 를 적용 (sphere + sprite). */
+/** Group 의 모든 머티리얼에 opacity 를 적용 (box + sprites). */
 function setGroupOpacity(group: THREE.Group, opacity: number) {
   group.traverse((obj) => {
     const mat = (obj as any).material as THREE.Material | undefined;
@@ -281,13 +334,53 @@ function setGroupOpacity(group: THREE.Group, opacity: number) {
 
 const DIM_COLOR = "#1f2937";
 
+function endpointId(end: string | { id?: string }): string {
+  return typeof end === "string" ? end : (end?.id ?? "");
+}
+
+/** 무방향 BFS 로 루트에서의 거리(층)를 계산. 도달 불가 노드는 결과에 없음(외곽 층 처리). */
+function computeLayers(nodes: GraphNode[], links: GraphLink[], rootId: string | undefined): Map<string, number> {
+  const layer = new Map<string, number>();
+  if (!rootId) return layer;
+  const adj = new Map<string, string[]>();
+  for (const n of nodes) adj.set(n.id, []);
+  for (const l of links) {
+    const s = endpointId(l.source as any);
+    const t = endpointId(l.target as any);
+    adj.get(s)?.push(t);
+    adj.get(t)?.push(s);
+  }
+  const queue = [rootId];
+  layer.set(rootId, 0);
+  while (queue.length) {
+    const cur = queue.shift()!;
+    const cl = layer.get(cur)!;
+    for (const nb of adj.get(cur) ?? []) {
+      if (!layer.has(nb)) {
+        layer.set(nb, cl + 1);
+        queue.push(nb);
+      }
+    }
+  }
+  return layer;
+}
+
 const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
   { data, onNodeSelect, onNodeReseed, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
   ref
 ) {
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
+  // 좌클릭 포커스: 클릭한 노드 + 직접 이웃을 강조하고 카메라를 그쪽으로 비행.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  // 단일/더블 클릭 구분 타이머
+  const clickTimer = useRef<number | null>(null);
+  // "다음 엔진 정지 때 카메라를 한 번 맞춰야 함" 플래그. 데이터(구조)가 바뀔 때만 켜고,
+  // 그 외(포커스/리프레시로 인한 재시뮬레이션)에선 사용자의 줌을 건드리지 않는다.
+  const fitPendingRef = useRef(true);
+  // 카메라 조정 방식: 최초 로드는 전체 fit, 이후 구조 변경(reseed 등)은 줌 유지한 채 새 중심으로 recenter.
+  const fitModeRef = useRef<"fit" | "recenter">("fit");
+  const loadedRef = useRef(false);
 
-  // 카메라를 타깃 기준으로 factor 만큼 멀거나 가깝게 이동
   function zoomBy(factor: number) {
     const fg = fgRef.current as any;
     if (!fg) return;
@@ -310,27 +403,195 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
       const scene = fg.scene?.();
       const camera = fg.camera?.();
       if (!renderer || !scene || !camera) return "";
-      // 같은 turn 안에서 render → toDataURL 호출. WebGL back buffer 가 유효한 시점.
       renderer.render(scene, camera);
       return (renderer.domElement as HTMLCanvasElement).toDataURL("image/png");
     }
   }), []);
 
-  // ForceGraph 는 source/target 을 객체 참조로 바꾸기 때문에 매 렌더 새 객체를 넘긴다.
-  const graphData = useMemo(() => ({
-    nodes: data.nodes.map(n => ({ ...n })),
-    links: data.links.map(l => ({ ...l }))
-  }), [data]);
+  // 루트 노드 — 중심(seed) 모드면 seed, 아니면 최다 연결(degree) 노드.
+  const rootId = useMemo(() => {
+    if (!data.nodes.length) return undefined;
+    if (data.seed && data.nodes.some((n) => n.id === data.seed)) return data.seed;
+    const deg = new Map<string, number>();
+    for (const l of data.links) {
+      deg.set(l.source, (deg.get(l.source) ?? 0) + 1);
+      deg.set(l.target, (deg.get(l.target) ?? 0) + 1);
+    }
+    let best = data.nodes[0].id;
+    let bestDeg = -1;
+    for (const n of data.nodes) {
+      const d = deg.get(n.id) ?? 0;
+      if (d > bestDeg) { bestDeg = d; best = n.id; }
+    }
+    return best;
+  }, [data]);
 
+  // 층(fy) 핀 고정 + x/z 는 force 에 맡김. ForceGraph 는 매번 새 객체를 받아야 한다.
+  const graphData = useMemo(() => {
+    const layers = computeLayers(data.nodes, data.links, rootId);
+    let maxL = 0;
+    for (const v of layers.values()) maxL = Math.max(maxL, v);
+    const nodes = data.nodes.map((n) => {
+      const L = layers.get(n.id) ?? (maxL + 1);
+      return {
+        ...n,
+        fy: -L * LAYER_GAP,
+        x: (Math.random() - 0.5) * 220,
+        z: (Math.random() - 0.5) * 220
+      };
+    });
+    const links = data.links.map((l) => ({ ...l }));
+    return { nodes, links };
+  }, [data, rootId]);
+
+  // 양방향/다중 엣지는 살짝 휘어 서로 겹치지 않게 — 쌍별 링크 수 집계.
+  const pairCount = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const l of data.links) {
+      const key = l.source < l.target ? `${l.source}|${l.target}` : `${l.target}|${l.source}`;
+      m.set(key, (m.get(key) ?? 0) + 1);
+    }
+    return m;
+  }, [data]);
+
+  function isMultiPair(l: GraphLink): boolean {
+    const s = endpointId(l.source as any);
+    const t = endpointId(l.target as any);
+    const key = s < t ? `${s}|${t}` : `${t}|${s}`;
+    return (pairCount.get(key) ?? 0) > 1;
+  }
+
+  // 검색 하이라이트(외부) 가 활성이면 그것을 우선. 아니면 좌클릭 포커스 이웃을 강조.
+  const searchActive = !!highlightedIds && highlightedIds.size > 0;
+  const focusActive = !searchActive && !!focusId;
+
+  // 포커스 기준 이웃 집합 (자기 자신 포함)
+  const focusNeighbors = useMemo(() => {
+    if (!focusId) return undefined;
+    const s = new Set<string>([focusId]);
+    for (const l of data.links) {
+      if (l.source === focusId) s.add(l.target);
+      if (l.target === focusId) s.add(l.source);
+    }
+    return s;
+  }, [focusId, data]);
+
+  const activeSet = searchActive ? highlightedIds : (focusActive ? focusNeighbors : undefined);
+  const activeBase = searchActive ? highlightBaseId : (focusActive ? focusId ?? undefined : undefined);
+  const anyActive = !!activeSet && activeSet.size > 0;
+
+  const isOn = useCallback((id: string): boolean => {
+    return !!activeSet && (activeSet.has(id) || id === activeBase);
+  }, [activeSet, activeBase]);
+
+  // 검색이 켜지면 좌클릭 포커스는 해제(혼선 방지).
+  useEffect(() => { if (searchActive) setFocusId(null); }, [searchActive]);
+  // 데이터(중심/범위) 바뀌면 포커스 초기화.
+  useEffect(() => { setFocusId(null); }, [data]);
+
+  // 구조(중심/깊이/루트/노드 수)가 바뀌면 다음 정지 때 한 번 카메라 조정.
+  // 최초 로드만 전체 fit, 이후 reseed 등은 줌을 유지한 채 새 중심으로 recenter.
+  // (컬럼 토글 등 같은 구조의 재시뮬레이션에선 켜지 않아 사용자가 키워둔 줌을 보존)
   useEffect(() => {
-    const t = setTimeout(() => fgRef.current?.zoomToFit(600, 80), 200);
+    fitPendingRef.current = true;
+    fitModeRef.current = loadedRef.current ? "recenter" : "fit";
+    loadedRef.current = true;
+  }, [data.seed, data.depth, rootId, data.nodes.length]);
+
+  // 카메라를 노드로 비행 — 현재 시선 방향을 유지한 채 FOCUS_DIST 만큼 떨어져 프레이밍.
+  function flyTo(node: any) {
+    const fg = fgRef.current as any;
+    if (!fg || node.x == null) return;
+    const target = { x: node.x, y: node.y, z: node.z };
+    const cam = fg.camera();
+    const dir = new THREE.Vector3(cam.position.x - target.x, cam.position.y - target.y, cam.position.z - target.z);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize().multiplyScalar(FOCUS_DIST);
+    fg.cameraPosition({ x: target.x + dir.x, y: target.y + dir.y, z: target.z + dir.z }, target, 600);
+  }
+
+  // 좌클릭=포커스 / 더블클릭=소스 이동. ForceGraph 는 onNodeClick 만 주므로 직접 판정.
+  function handleNodeClick(n: any) {
+    if (clickTimer.current != null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onNodeSelect(n as GraphNode); // 더블클릭
+      return;
+    }
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      const node = n as GraphNode;
+      setFocusId(node.id);
+      flyTo(n); // 단일클릭 — 포커스
+    }, 250);
+  }
+
+  // === 초기 fit / force 튜닝 ===
+  // 폴백 — 시뮬레이션이 끝까지 안 멈추는 경우 대비(주 경로는 onEngineStop).
+  // 같은 handleEngineStop 을 호출해 fit/recenter 로직과 fitPending 가드를 공유.
+  useEffect(() => {
+    const t = setTimeout(() => handleEngineStop(), 1800);
     return () => clearTimeout(t);
-  }, [data.seed, data.depth]);
+  }, [data.seed, data.depth, rootId]);
 
+  // force 파라미터 튜닝 — d3ForceLayout 은 init 시 존재하므로 안전.
+  // 주의: d3ReheatSimulation() 은 호출하지 않는다. graphData digest(=state.layout 할당) 전에
+  // 호출되면 engineRunning 만 켜져 layoutTick 이 state.layout(undefined).tick() 으로 첫 프레임에
+  // 크래시한다 → 렌더 루프 사망 → 검정 화면. 초기 digest 가 알아서 시뮬레이션을 돌린다.
+  useEffect(() => {
+    const fg = fgRef.current as any;
+    if (!fg) return;
+    const charge = fg.d3Force?.("charge");
+    if (charge?.strength) charge.strength(-130);
+    const link = fg.d3Force?.("link");
+    if (link?.distance) link.distance(64);
+  }, [data, rootId]);
 
-  // 마우스 버튼 매핑:
-  //  - 휠 버튼 드래그: 기본 DOLLY(줌) → PAN(이동)
-  //  - 좌클릭: grabMode 가 켜져있으면 PAN(이동), 아니면 ROTATE(회전)
+  // 안개 — 그래프 bbox 기준으로 잡아, 오버뷰에선 안 가리고 가까이 들어갔을 때만 먼 노드를 페이드.
+  function applyFog(fg: any) {
+    const scene = fg.scene?.();
+    const bbox = fg.getGraphBbox?.();
+    if (scene && bbox) {
+      const span = Math.max(
+        bbox.x[1] - bbox.x[0], bbox.y[1] - bbox.y[0], bbox.z[1] - bbox.z[0], 200
+      );
+      scene.fog = new THREE.Fog(UI.canvas3d, span * 1.2, span * 4.0);
+    }
+  }
+
+  // 줌(카메라-타깃 거리)을 그대로 유지한 채, 시점만 새 중심(root) 노드로 옮긴다.
+  // reseed 는 새 그래프라 좌표가 전부 바뀌므로 카메라를 그대로 두면 빈 공간을 보게 된다 →
+  // 배율은 보존하고 새 중심을 같은 거리에서 바라보게 재배치한다.
+  function recenterOnRoot(fg: any) {
+    const node = graphData.nodes.find((n) => n.id === rootId) as any;
+    if (!node || node.x == null) { fg.zoomToFit(500, 100); return; }
+    const cam = fg.camera();
+    const controls = fg.controls?.();
+    const oldTarget: THREE.Vector3 = controls?.target ?? new THREE.Vector3(0, 0, 0);
+    const dist = cam.position.distanceTo(oldTarget) || 200;
+    const dir = new THREE.Vector3(
+      cam.position.x - oldTarget.x, cam.position.y - oldTarget.y, cam.position.z - oldTarget.z
+    );
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize().multiplyScalar(dist);
+    const target = { x: node.x, y: node.y, z: node.z };
+    fg.cameraPosition({ x: target.x + dir.x, y: target.y + dir.y, z: target.z + dir.z }, target, 600);
+  }
+
+  // 시뮬레이션이 안정화되면 그때 한 번만 카메라를 조정한다(가드로 사용자의 줌 보존).
+  function handleEngineStop() {
+    const fg = fgRef.current as any;
+    if (!fg || !fitPendingRef.current) return;
+    fitPendingRef.current = false;
+    if (fitModeRef.current === "fit") {
+      fg.zoomToFit(500, 100);
+    } else {
+      recenterOnRoot(fg);
+    }
+    applyFog(fg);
+  }
+
+  // 마우스 버튼 매핑 (좌클릭 회전 / 휠·우클릭 이동)
   useEffect(() => {
     const t = setTimeout(() => {
       const controls = fgRef.current?.controls?.() as any;
@@ -345,24 +606,10 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     return () => clearTimeout(t);
   }, [grabMode]);
 
-  const hlActive = !!highlightedIds && highlightedIds.size > 0;
-  // 하이라이트 활성 시 기준 노드는 항상 포함되도록 판정
-  function isHighlighted(id: string): boolean {
-    return !!highlightedIds && (highlightedIds.has(id) || id === highlightBaseId);
-  }
-  // 하이라이트 변경 시 ForceGraph 가 색상/크기 캐시를 새로 계산하도록 트리거
+  // 강조/포커스/컬럼 변경 시 노드·엣지 객체를 다시 계산하도록 리프레시.
   useEffect(() => {
     fgRef.current?.refresh?.();
-  }, [highlightedIds, highlightBaseId]);
-
-  function linkEndpointId(end: string | { id?: string }): string {
-    return typeof end === "string" ? end : (end?.id ?? "");
-  }
-
-  // 컬럼 표시 변경 시 ForceGraph 가 nodeThreeObject 를 다시 호출하도록 리프레시
-  useEffect(() => {
-    fgRef.current?.refresh?.();
-  }, [showColumns]);
+  }, [activeSet, activeBase, showColumns]);
 
   return (
     <div style={{ position: "relative", width, height }}>
@@ -372,6 +619,9 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         height={height}
         graphData={graphData}
         backgroundColor={UI.canvas3d}
+        cooldownTicks={200}
+        d3VelocityDecay={0.4}
+        onEngineStop={handleEngineStop}
         nodeLabel={(n: any) => `<div style="padding:4px 8px;background:#111827;border-radius:4px">
           <b>${(n as GraphNode).name}</b><br/>
           <span style="color:#9aa5b1">${(n as GraphNode).pkg}</span><br/>
@@ -382,21 +632,45 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         linkColor={(l: any) => {
           const link = l as GraphLink;
           const base = RELATION_COLOR[link.relation] ?? "#666";
-          if (!hlActive) return base;
-          const s = linkEndpointId((l as any).source);
-          const t = linkEndpointId((l as any).target);
-          return (isHighlighted(s) || isHighlighted(t)) ? base : DIM_COLOR;
+          if (!anyActive) return base;
+          const s = endpointId((l as any).source);
+          const t = endpointId((l as any).target);
+          return (isOn(s) || isOn(t)) ? base : DIM_COLOR;
         }}
-        linkOpacity={hlActive ? 0.25 : 0.6}
+        linkLabel={(l: any) => {
+          const link = l as GraphLink;
+          const s = endpointId((l as any).source);
+          const t = endpointId((l as any).target);
+          return `<div style="padding:3px 7px;background:#111827;border-radius:4px;font-size:12px">
+            <b style="color:${RELATION_COLOR[link.relation] ?? "#aaa"}">${RELATION_LABEL[link.relation] ?? link.relation}</b>
+            <span style="color:#9aa5b1"> · ${s.split(".").pop()} → ${t.split(".").pop()}</span>
+          </div>`;
+        }}
+        linkOpacity={anyActive ? 0.16 : 0.5}
+        linkWidth={(l: any) => {
+          if (!anyActive) return 0;
+          const s = endpointId((l as any).source);
+          const t = endpointId((l as any).target);
+          return (isOn(s) || isOn(t)) ? 1.2 : 0;
+        }}
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={1}
+        linkCurvature={(l: any) => (isMultiPair(l as GraphLink) ? 0.25 : 0)}
+        linkCurveRotation={(l: any) => {
+          const s = endpointId((l as any).source);
+          const t = endpointId((l as any).target);
+          return s < t ? 0 : Math.PI;
+        }}
 
-        // 엣지 중점에 관계 라벨(1:N 등) sprite — 색각 보조 단서.
+        // 관계 라벨 sprite — 강조(포커스/검색)된 엣지에만. 평상시엔 깔끔하게 비움.
         linkThreeObjectExtend={true}
-        linkThreeObject={((l: any) => {
+        linkThreeObject={(anyActive ? ((l: any) => {
+          const s = endpointId((l as any).source);
+          const t = endpointId((l as any).target);
+          if (!(isOn(s) && isOn(t))) return undefined as any;
           const rel = (l as GraphLink).relation;
           return makeLinkLabelSprite(RELATION_LABEL[rel] ?? rel, RELATION_COLOR[rel] ?? "#aaa");
-        }) as any}
+        }) : undefined) as any}
         linkPositionUpdate={((sprite: any, { start, end }: any) => {
           if (!sprite) return;
           sprite.position.set(
@@ -406,22 +680,17 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
           );
         }) as any}
 
-        onNodeClick={(n: any) => onNodeSelect(n as GraphNode)}
+        onNodeClick={(n: any) => handleNodeClick(n)}
         onNodeRightClick={(n: any) => onNodeReseed(n as GraphNode)}
-        // 좌클릭: 소스로 점프 / 우클릭: 그 노드를 새 seed 로
-        // 노드 수동 드래그 비활성 — 카드 sprite 가 화면을 많이 덮어 드래그가
-        // 회전 대신 노드 끌기로 잡혀버리는 문제 회피. 배치는 force 시뮬레이션에 일임.
+        onBackgroundClick={() => setFocusId(null)}
         enableNodeDrag={false}
 
-        // 노드를 (3D anchor sphere + 카드 sprite 라벨) Group 으로 치환.
-        // sphere 는 회전/원근에 반응하는 진짜 3D 객체라 깊이 단서 제공,
-        // 카드는 그 위에 떠 있는 빌보드 라벨로 가독성 유지.
         nodeThreeObjectExtend={false}
         nodeThreeObject={((n: any) => {
           const node = n as GraphNode;
           const obj = makeEntityCardObject(node, showColumns);
-          if (hlActive && !isHighlighted(node.id)) {
-            setGroupOpacity(obj, 0.18);
+          if (anyActive && !isOn(node.id)) {
+            setGroupOpacity(obj, 0.16);
           }
           return obj;
         }) as any}/>

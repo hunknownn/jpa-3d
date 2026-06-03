@@ -45,6 +45,14 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
           padding: "10px 12px", lineHeight: 1.5,
           boxShadow: "0 6px 20px rgba(0,0,0,0.4)"
         }}>
+          {view === "3d" && (
+            <div style={{
+              color: UI.textMuted, fontSize: 11, lineHeight: 1.5,
+              marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${UI.border}`
+            }}>
+              수직 <b style={{ color: UI.text }}>층</b> = 중심에서의 거리(홉). 가까이 가면 카드가 펼쳐집니다.
+            </div>
+          )}
           <Section title="관계">
             {REL_ORDER.map((rel) => (
               <Row key={rel}

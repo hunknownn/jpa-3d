@@ -658,7 +658,9 @@ function HelpButton({ open, onToggle }: { open: boolean; onToggle: () => void })
 
 function HelpPopover({ onClose, top }: { onClose: () => void; top: number }) {
   const rows: [string, string][] = [
-    ["클릭", "엔티티의 소스 파일로 이동"],
+    ["클릭 (3D)", "그 노드로 카메라 이동 · 이웃 강조"],
+    ["더블클릭 (3D)", "엔티티의 소스 파일로 이동"],
+    ["클릭 (2D)", "엔티티의 소스 파일로 이동"],
     ["우클릭", "그 노드를 중심(seed)으로 다시 탐색"],
     ["드래그 (2D)", "노드 위치 이동 · ↺ 로 복원"],
     ["컬럼에 마우스", "해당 엔티티에 연결된 관계 강조"],
