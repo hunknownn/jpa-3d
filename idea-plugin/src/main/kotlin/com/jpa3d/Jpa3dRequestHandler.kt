@@ -16,6 +16,7 @@ import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphNode
 import com.jpa3d.model.GraphScope
 import com.jpa3d.model.Relation
+import com.jpa3d.settings.Jpa3dSettings
 
 /**
  * viewer → plugin 요청 처리기. JSON 문자열 in → JSON 문자열 out.
@@ -107,6 +108,11 @@ class Jpa3dRequestHandler(private val project: Project) {
             nodes = nodes.filter { it.entity?.kind != "mappedSuperclass" }
         }
 
+        // 1-2) 설정(설정 → 도구 → JPA 3D)의 분석 대상 패키지 필터 적용.
+        // 요청 시점에 적용하므로 설정 변경이 다음 동기화/요청에 즉시 반영된다(캐시 불변).
+        val settings = Jpa3dSettings.getInstance().state
+        nodes = applyPackageFilter(nodes, settings.includePackages, settings.excludePackages)
+
         // 2) scope=seed → 멀티 소스 BFS (FQN=단일, package=해당 패키지 엔티티 전부가 출발점)
         if (scope == "seed" && !seed.isNullOrBlank()) {
             val seeds = GraphScope.resolveSeeds(nodes, seedType, seed)
@@ -132,6 +138,32 @@ class Jpa3dRequestHandler(private val project: Project) {
 
         return GraphData(seed = seed.orEmpty(), depth = depth, nodes = nodes, links = links)
     }
+
+    /**
+     * include/exclude 패키지 패턴으로 노드를 거른다(접두 매칭, [GraphScope] 와 동일 규칙).
+     *  - include 가 비면 전체 허용, 아니면 매칭되는 노드만.
+     *  - exclude 매칭은 include 보다 우선해 항상 제거.
+     * 두 패턴이 모두 비면 입력을 그대로 돌려준다.
+     */
+    private fun applyPackageFilter(
+        nodes: List<GraphNode>,
+        include: String,
+        exclude: String
+    ): List<GraphNode> {
+        val inc = parsePackagePatterns(include)
+        val exc = parsePackagePatterns(exclude)
+        if (inc.isEmpty() && exc.isEmpty()) return nodes
+        fun matches(pkg: String, p: String) = pkg == p || pkg.startsWith("$p.")
+        return nodes.filter { n ->
+            val included = inc.isEmpty() || inc.any { matches(n.pkg, it) }
+            val excluded = exc.any { matches(n.pkg, it) }
+            included && !excluded
+        }
+    }
+
+    /** 줄바꿈/쉼표로 구분된 패키지 목록을 trim + 빈 줄 제거해 파싱. */
+    private fun parsePackagePatterns(raw: String): List<String> =
+        raw.split('\n', ',').map { it.trim() }.filter { it.isNotEmpty() }
 
     private fun handleSearch(args: Map<String, Any?>?): String {
         if (DumbService.isDumb(project)) return "[]"

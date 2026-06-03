@@ -35,14 +35,17 @@ import javax.swing.SpinnerNumberModel
  */
 class ExportDialog(private val project: Project) : DialogWrapper(project, true) {
 
+    // DDL 관련 초기값은 설정(설정 → 도구 → JPA 3D)의 Export 기본값에서 가져온다.
+    private val settings = com.jpa3d.settings.Jpa3dSettings.getInstance().state
+
     private val cbJson = JCheckBox("JSON (단순화 스키마)", true)
     private val cbDdl = JCheckBox("DDL (SQL)", true)
     private val cbMermaid = JCheckBox("Mermaid (.mmd)", true)
     private val cbSnapshotPng = JCheckBox("PNG (2D · 3D)", false)
     private val cbSnapshotSvg = JCheckBox("SVG (2D 뷰만)", false)
 
-    private val cbSnakeCase = JCheckBox("snake_case 이름 변환 (UserAccount → user_account)", true)
-    private val cbDropExisting = JCheckBox("DROP TABLE IF EXISTS 헤더 추가 (재실행 안전)", false)
+    private val cbSnakeCase = JCheckBox("snake_case 이름 변환 (UserAccount → user_account)", settings.ddlSnakeCase)
+    private val cbDropExisting = JCheckBox("DROP TABLE IF EXISTS 헤더 추가 (재실행 안전)", settings.ddlDropExisting)
 
     private val dialectCombo = JComboBox(DdlDialect.values()).apply {
         setRenderer { list, value, _, isSelected, _ ->
@@ -53,7 +56,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
                 border = JBUI.Borders.empty(2, 6)
             }
         }
-        selectedItem = DdlDialect.POSTGRES
+        selectedItem = settings.ddlDialect
     }
 
     private val rbAll = JRadioButton("전체 모델", true)

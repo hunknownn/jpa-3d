@@ -52,6 +52,35 @@ function readParamsFromHash(): ErdParams {
   return { scope, seed, seedType, showColumns, showRepository, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
 }
 
+/** plugin(BridgeInjector)이 주입하는 설정 기반 뷰어 기본값. 스탠드얼론(브라우저)에선 없음. */
+interface ViewerDefaults {
+  view?: string; scope?: string; depth?: number;
+  col?: boolean; repo?: boolean; extends?: boolean;
+}
+
+/** 모듈 로드 시점의 해시 쿼리 — 비어 있으면 "fresh open" 으로 보고 설정 기본값을 적용한다. */
+const INITIAL_QS: string = (() => {
+  const hash = window.location.hash.slice(1);
+  const qIdx = hash.indexOf("?");
+  return qIdx >= 0 ? hash.slice(qIdx + 1) : "";
+})();
+
+/** window.__JPA3D_DEFAULTS__ → ErdParams. 주입 전이면 null. */
+function readViewerDefaults(): ErdParams | null {
+  const d = (window as unknown as { __JPA3D_DEFAULTS__?: ViewerDefaults }).__JPA3D_DEFAULTS__;
+  if (!d) return null;
+  return {
+    scope: d.scope === "seed" ? "seed" : "all",
+    seed: undefined,
+    seedType: "fqn",
+    showColumns: !!d.col,
+    showRepository: !!d.repo,
+    showExtends: d.extends !== false,
+    depth: Number.isFinite(d.depth) ? (d.depth as number) : 2,
+    view: d.view === "2d" ? "2d" : "3d"
+  };
+}
+
 function writeParamsToHash(params: ErdParams) {
   const p = new URLSearchParams();
   p.set("scope", params.scope);
@@ -157,6 +186,36 @@ export default function ErdApp() {
   useEffect(() => {
     writeParamsToHash(params);
   }, [params]);
+
+  // 설정(설정 → 도구 → JPA 3D) 기반 뷰어 기본값 1회 적용.
+  // 해시 없이 fresh 로 열렸을 때만, 그리고 defaults 주입 시점(bridge-ready)을 기다려 한 번만 적용한다.
+  // 공유/기존 해시로 열렸으면(INITIAL_QS 존재) 그 상태를 우선해 건드리지 않는다.
+  const defaultsAppliedRef = useRef(false);
+  useEffect(() => {
+    if (INITIAL_QS) return;
+    const apply = () => {
+      if (defaultsAppliedRef.current) return;
+      const d = readViewerDefaults();
+      if (!d) return;
+      defaultsAppliedRef.current = true;
+      setParams(d);
+    };
+    apply(); // 이미 주입돼 있으면 즉시
+    window.addEventListener("jpa3d:bridge-ready", apply);
+    return () => window.removeEventListener("jpa3d:bridge-ready", apply);
+  }, []);
+
+  // 툴윈도우 재오픈 시 plugin 이 바뀐 기본값을 push (jpa3d:apply-defaults).
+  // 살아있는 뷰어 인스턴스라 페이지 리로드가 없으므로, 이 이벤트로 파라미터를 기본값으로 리셋한다.
+  // (위 1회용 가드와 달리 매번 적용 — push 자체가 "설정이 바뀌었을 때만" 오므로 안전)
+  useEffect(() => {
+    const onApply = () => {
+      const d = readViewerDefaults();
+      if (d) setParams(d);
+    };
+    window.addEventListener("jpa3d:apply-defaults", onApply);
+    return () => window.removeEventListener("jpa3d:apply-defaults", onApply);
+  }, []);
 
   // ERD 데이터 fetch — depth 를 **제외한** 입력이 바뀔 때만 재요청한다.
   // depth 는 FULL_DEPTH 로 연결성분 전체를 받아두고 클라이언트에서 자르므로 fetch 에서 뺀다.

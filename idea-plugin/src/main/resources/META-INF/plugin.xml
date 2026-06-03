@@ -70,6 +70,13 @@
             factoryClass="com.jpa3d.Jpa3dToolWindowFactory"/>
 
         <notificationGroup id="JPA 3D Export" displayType="BALLOON"/>
+
+        <!-- 설정 → 도구 → JPA 3D (뷰어/분석/Export 기본값). -->
+        <applicationConfigurable
+            parentId="tools"
+            id="com.jpa3d.settings"
+            displayName="JPA 3D"
+            instance="com.jpa3d.settings.Jpa3dConfigurable"/>
     </extensions>
 
     <actions>

@@ -1,6 +1,7 @@
 package com.jpa3d
 
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.jpa3d.settings.Jpa3dSettings
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
@@ -30,8 +31,12 @@ class BridgeInjector(private val jsQuery: JBCefJSQuery) : CefLoadHandlerAdapter(
             /* onFailureCallback = */ "function(errorCode, errorMessage) { reject(new Error(errorMessage)); }"
         )
 
+        // 설정(설정 → 도구 → JPA 3D)의 뷰어 기본값 — 툴윈도우를 fresh 로 열 때 viewer 의 초기 파라미터.
+        val defaultsJson = Jpa3dSettings.getInstance().viewerDefaultsJson()
+
         val script = """
             (function() {
+              window.__JPA3D_DEFAULTS__ = $defaultsJson;
               window.__JPA3D_BRIDGE__ = {
                 request: function(kind, args) {
                   return new Promise(function(resolve, reject) {
