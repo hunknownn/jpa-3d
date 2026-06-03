@@ -6,6 +6,7 @@ import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
 import { UI, RADIUS, controlButton } from "./theme";
 import { IconSync, IconSearch } from "./Icons";
+import { bfsDistances, endpointId, resolveSeedIds } from "./graphDepth";
 
 type Scope = "all" | "seed";
 type SeedType = "fqn" | "package";
@@ -26,6 +27,13 @@ interface ErdParams {
 }
 
 const EMPTY_DATA: GraphData = { seed: "", depth: 0, nodes: [], links: [] };
+
+/**
+ * envelope fetch 깊이 — seed 연결성분 전체를 받아오기 위한 충분히 큰 값.
+ * 백엔드 BFS 는 frontier 가 비면 조기 종료하므로 실제 비용은 그래프 지름까지만 든다.
+ * 이 한 번의 fetch 로 받아둔 데이터를 클라이언트에서 depth 별로 잘라 쓴다.
+ */
+const FULL_DEPTH = 1000;
 
 function readParamsFromHash(): ErdParams {
   const hash = window.location.hash.slice(1);
@@ -75,7 +83,9 @@ interface SuggestItem {
 
 export default function ErdApp() {
   const [params, setParams] = useState<ErdParams>(() => readParamsFromHash());
-  const [data, setData] = useState<GraphData>(EMPTY_DATA);
+  // seed 연결성분 전체(=envelope) — depth 필터 전의 원본. depth 변경은 이걸 다시 받지 않고
+  // 아래 useMemo 에서 로컬로 자른다.
+  const [fullData, setFullData] = useState<GraphData>(EMPTY_DATA);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggests, setSuggests] = useState<GraphNode[]>([]);
@@ -148,10 +158,12 @@ export default function ErdApp() {
     writeParamsToHash(params);
   }, [params]);
 
-  // ERD 데이터 fetch — params 변경 또는 invalidate 이벤트(refreshTick) 시 재실행
+  // ERD 데이터 fetch — depth 를 **제외한** 입력이 바뀔 때만 재요청한다.
+  // depth 는 FULL_DEPTH 로 연결성분 전체를 받아두고 클라이언트에서 자르므로 fetch 에서 뺀다.
+  // (refreshTick = 동기화/인덱싱 재시도 트리거)
   useEffect(() => {
     if (params.scope === "seed" && !params.seed) {
-      setData(EMPTY_DATA);
+      setFullData(EMPTY_DATA);
       return;
     }
     setLoading(true);
@@ -160,15 +172,47 @@ export default function ErdApp() {
       scope: params.scope,
       seed: params.seed,
       seedType: params.seedType,
-      depth: params.depth,
+      depth: FULL_DEPTH,
       showColumns: params.showColumns,
       showRepository: params.showRepository,
       showExtends: params.showExtends
     })
-      .then(setData)
+      .then(setFullData)
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
-  }, [params, refreshTick]);
+  }, [
+    params.scope, params.seed, params.seedType,
+    params.showColumns, params.showRepository, params.showExtends,
+    refreshTick
+  ]);
+
+  // seed 로부터의 홉 거리 + 최대 깊이(슬라이더 상한). 전체 모드면 필터 비활성.
+  const { distances, maxDepth } = useMemo(() => {
+    if (params.scope !== "seed" || !params.seed) {
+      return { distances: null as Map<string, number> | null, maxDepth: 0 };
+    }
+    const seeds = resolveSeedIds(fullData.nodes, params.seedType, params.seed);
+    const dist = bfsDistances(seeds, fullData.links);
+    let mx = 0;
+    for (const v of dist.values()) mx = Math.max(mx, v);
+    return { distances: dist, maxDepth: mx };
+  }, [fullData, params.scope, params.seed, params.seedType]);
+
+  // 화면에 보낼 데이터 — envelope 를 현재 depth(홉) 까지 로컬로 자른 부분 그래프.
+  // 전체 모드/필터 비활성이면 envelope 그대로.
+  const data = useMemo<GraphData>(() => {
+    if (params.scope !== "seed" || !params.seed || !distances) return fullData;
+    const limit = Math.min(params.depth, maxDepth);
+    const keepNodes = fullData.nodes.filter((n) => {
+      const d = distances.get(n.id);
+      return d != null && d <= limit;
+    });
+    const keep = new Set(keepNodes.map((n) => n.id));
+    const keepLinks = fullData.links.filter(
+      (l) => keep.has(endpointId(l.source)) && keep.has(endpointId(l.target))
+    );
+    return { ...fullData, depth: limit, nodes: keepNodes, links: keepLinks };
+  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seed]);
 
   // 검색
   useEffect(() => {
@@ -206,7 +250,7 @@ export default function ErdApp() {
   function pickSeed(n: GraphNode) {
     // Repository 선택 시: 해당 Repository 가 가리키는 첫 Entity 를 seed 로
     if (n.entity == null) {
-      const target = data.links.find((l) => l.source === n.id && l.relation === "USES_ENTITY")?.target;
+      const target = fullData.links.find((l) => l.source === n.id && l.relation === "USES_ENTITY")?.target;
       if (target) {
         setParams({ ...params, scope: "seed", seedType: "fqn", seed: target });
         setQuery(target);
@@ -311,6 +355,16 @@ export default function ErdApp() {
               }}
             />
             <Divider />
+            {params.seed && (
+              <>
+                <DepthSlider
+                  value={params.depth}
+                  max={maxDepth}
+                  onChange={(depth) => setParams({ ...params, depth })}
+                />
+                <Divider />
+              </>
+            )}
           </>
         )}
         <OptionsMenu
@@ -544,6 +598,45 @@ function SeedTypeToggle({ value, onChange }: { value: SeedType; onChange: (v: Se
         <SegItem first active={value === "fqn"} onClick={() => onChange("fqn")}>엔티티</SegItem>
         <SegItem active={value === "package"} onClick={() => onChange("package")}>패키지</SegItem>
       </SegGroup>
+    </div>
+  );
+}
+
+/**
+ * 연결 깊이(seed 로부터의 홉) 슬라이더 — 0..max 를 마우스 드래그로 조절.
+ * 필터링은 클라이언트 로컬이라 재요청 없이 즉시 반영된다(실시간 드래그).
+ * max 는 현재 seed 연결성분의 실제 최대 거리. max<=0 (seed 고립/미로딩) 이면 비활성.
+ */
+function DepthSlider({ value, max, onChange }: {
+  value: number; max: number; onChange: (v: number) => void;
+}) {
+  const disabled = max <= 0;
+  const shown = Math.min(value, Math.max(max, 0));
+  return (
+    <div style={groupStyle}>
+      <span style={labelStyle}>깊이:</span>
+      <input
+        type="range"
+        min={0}
+        max={Math.max(max, 1)}
+        step={1}
+        value={shown}
+        disabled={disabled}
+        aria-label="연결 깊이"
+        title={disabled ? "연결된 이웃이 없습니다" : `seed 로부터 ${shown} 홉 (최대 ${max})`}
+        onChange={(e) => onChange(parseInt(e.target.value, 10))}
+        style={{
+          width: 92, accentColor: UI.accent,
+          cursor: disabled ? "default" : "pointer",
+          opacity: disabled ? 0.5 : 1
+        }}
+      />
+      <span style={{
+        ...labelStyle, color: UI.textDim, minWidth: 30,
+        fontVariantNumeric: "tabular-nums", textAlign: "right"
+      }}>
+        {shown}/{Math.max(max, 0)}
+      </span>
     </div>
   );
 }
