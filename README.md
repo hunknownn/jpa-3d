@@ -32,6 +32,7 @@ Top bar controls:
 | Control | What it does |
 |---|---|
 | 전체 / seed 중심 | Show every entity, or only the BFS-reachable subgraph around a seed |
+| 깊이 slider | Adjust the seed neighborhood depth (BFS hops) in real time — client-side, no re-query |
 | 표시 (관계만 / +컬럼 / +Repository) | Detail level — bare ERD, with columns, or including Spring Data repositories |
 | 상속 ON/OFF | Toggle `EXTENDS` edges (`@MappedSuperclass` chains) |
 | 뷰 3D / 2D | Switch renderer |
@@ -43,18 +44,36 @@ Other interactions:
 - **Drag** a node (2D view) — manually reposition; click "위치초기화" to undo.
 - **Right-click** a node — set as new seed.
 - **Hover** a column row — highlight all edges connected to that entity.
+- **3D minimap** (bottom corner) — click anywhere to fly the camera there while keeping zoom.
+
+## Export
+
+**Tools → JPA 3D: Export…** dumps the current model (or the seed-centered subgraph) to:
+
+- **JSON** — the full entity/relation schema.
+- **DDL** — `CREATE TABLE` for **PostgreSQL / MySQL / H2 / Oracle**, with optional `snake_case` naming and `DROP TABLE IF EXISTS` headers.
+- **Mermaid** — `erDiagram` source.
+- **PNG / SVG** — a snapshot of the current viewer (SVG is 2D-only).
+
+Defaults for view/scope/depth, analysis package filters, and Export options live under **Settings → Tools → JPA 3D**.
 
 ## Features
 
 - **3D force-directed graph** and **2D orthogonal ERD** (elkjs layered layout)
+- **3D minimap** — projected overview of every node with the current view box; click to fly the camera there
+- **Connection depth slider** — adjust the seed neighborhood depth in real time (client-side filtering)
 - **Crow's foot cardinality markers** for `@OneToMany`, `@ManyToOne`, `@OneToOne`, `@ManyToMany`
 - **`@Inheritance` strategy badges** (`SINGLE_TABLE` / `JOINED` / `TABLE_PER_CLASS`) with `@DiscriminatorColumn` / `@DiscriminatorValue`
 - **Multi-level Spring Data Repository inheritance** — follows user-defined intermediate interfaces (e.g. `MyBaseRepo<T> extends JpaRepository<T,ID>`)
+- **FK columns** on entity cards for `@ManyToOne` / owning `@OneToOne` with `@JoinColumn` name resolution
+- **`@Table` indexes / uniqueConstraints** rendered as column glyphs (◆ unique, # indexed)
 - Bidirectional relationship deduplication (drops `mappedBy` mirror edges automatically)
-- Column metadata: PK, nullable, unique, length, `@GeneratedValue` strategy, `@Column(name=...)`
+- Column metadata: PK, FK, nullable, unique, length, `@GeneratedValue` strategy, `@Column(name=...)`
 - `@MappedSuperclass` / `@Embeddable` rendered with `EXTENDS` edges
 - **Search highlight** — typing in the search box fades non-matching nodes/edges
 - **Manual layout overrides** — drag nodes in 2D; reset anytime
+- **Export** to JSON / DDL (PostgreSQL / MySQL / H2 / Oracle) / Mermaid / PNG / SVG
+- **Settings page** (Settings → Tools → JPA 3D) — persist viewer, analysis-filter, and Export defaults
 - **Java & Kotlin** via UAST — Kotlin annotation use-site targets handled transparently
 - Both `jakarta.persistence` and legacy `javax.persistence`
 - Analysis runs in a read action and is cached; manual sync button avoids EDT lag

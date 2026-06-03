@@ -9,6 +9,8 @@
         <b>Features</b>
         <ul>
           <li><b>3D force-directed graph</b> with entity-card sprites &amp; 3D depth anchors, plus <b>2D orthogonal ERD</b> (elkjs layered layout)</li>
+          <li><b>3D minimap</b> &mdash; projected overview of every node with the current view box; click to fly the camera there (keeps zoom)</li>
+          <li><b>Connection depth slider</b> &mdash; adjust the seed neighborhood depth in real time (client-side filtering, no re-query)</li>
           <li><b>Crow's foot cardinality markers</b> for <code>@OneToMany</code>, <code>@ManyToOne</code>, <code>@OneToOne</code>, <code>@ManyToMany</code></li>
           <li><b>@Inheritance strategy badges</b> (<code>SINGLE_TABLE</code> / <code>JOINED</code> / <code>TABLE_PER_CLASS</code>) with <code>@DiscriminatorColumn</code> / <code>@DiscriminatorValue</code></li>
           <li><b>Multi-level Spring Data Repository inheritance</b> &mdash; follows user-defined intermediate interfaces (<code>MyBaseRepo&lt;T&gt; extends JpaRepository&lt;T,ID&gt;</code>)</li>
@@ -22,6 +24,8 @@
           <li><b>Background analysis</b> &mdash; cache pre-warmed after indexing, no EDT blocking</li>
           <li>Java &amp; Kotlin support via UAST &mdash; handles Kotlin's annotation use-site targets transparently</li>
           <li>Both <code>jakarta.persistence</code> and legacy <code>javax.persistence</code> packages</li>
+          <li><b>Export</b> &mdash; <i>Tools → JPA 3D: Export…</i> to <b>JSON</b>, <b>DDL</b> (PostgreSQL / MySQL / H2 / Oracle, optional snake_case &amp; <code>DROP TABLE</code>), <b>Mermaid</b>, and viewer snapshots (<b>PNG</b> / <b>SVG</b>)</li>
+          <li><b>Settings page</b> under <i>Settings → Tools → JPA 3D</i> &mdash; persist viewer defaults (view / scope / depth / display), analysis package include/exclude filters, and Export defaults</li>
         </ul>
         <br/>
         Open the <b>JPA 3D</b> tool window on the right side after the project is indexed.
@@ -96,7 +100,7 @@
         <action id="JPA3D.Export"
                 class="com.jpa3d.export.ExportAction"
                 text="JPA 3D: Export..."
-                description="JPA 3D 모델을 JSON / DDL / Mermaid / PlantUML / SVG 로 export">
+                description="JPA 3D 모델을 JSON / DDL / Mermaid / PNG / SVG 로 export">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
     </actions>
