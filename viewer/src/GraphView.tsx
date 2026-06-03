@@ -24,7 +24,8 @@ export interface GraphHandle {
 interface Props {
   data: GraphData;
   /** 더블클릭 — 소스 파일로 이동(2D 와 의미 동일). 단일 클릭은 카메라 포커스라 여기로 오지 않는다. */
-  onNodeSelect: (n: GraphNode) => void;
+  /** @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
+  onNodeSelect: (n: GraphNode, split?: boolean) => void;
   onNodeReseed: (n: GraphNode) => void;
   highlightedIds?: Set<string>;
   /** 하이라이트의 기준이 된 노드 — highlightedIds 가 활성일 때 항상 포함됨 */
@@ -511,7 +512,16 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
   }
 
   // 좌클릭=포커스 / 더블클릭=소스 이동. ForceGraph 는 onNodeClick 만 주므로 직접 판정.
-  function handleNodeClick(n: any) {
+  // Cmd(mac)/Ctrl + 클릭 → 즉시 새 탭(분할)으로 소스 이동.
+  function handleNodeClick(n: any, e?: MouseEvent) {
+    if (e && (e.metaKey || e.ctrlKey)) {
+      if (clickTimer.current != null) {
+        window.clearTimeout(clickTimer.current);
+        clickTimer.current = null;
+      }
+      onNodeSelect(n as GraphNode, true);
+      return;
+    }
     if (clickTimer.current != null) {
       window.clearTimeout(clickTimer.current);
       clickTimer.current = null;
@@ -690,7 +700,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
           );
         }) as any}
 
-        onNodeClick={(n: any) => handleNodeClick(n)}
+        onNodeClick={(n: any, e: any) => handleNodeClick(n, e)}
         onNodeRightClick={(n: any) => onNodeReseed(n as GraphNode)}
         onBackgroundClick={() => setFocusId(null)}
         enableNodeDrag={false}

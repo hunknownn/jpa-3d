@@ -15,7 +15,8 @@ interface Props {
   /** 컬럼 표시 여부 (관계는 항상 표시). */
   showColumns: boolean;
   onNodeReseed: (n: GraphNode) => void;
-  onNodeNavigate?: (n: GraphNode) => void;
+  /** @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
+  onNodeNavigate?: (n: GraphNode, split: boolean) => void;
   /** 검색 매칭 노드 id 집합. 비어있지 않으면 비매칭 노드/엣지를 페이드한다. */
   highlightedIds?: Set<string>;
   /** 하이라이트 기준 노드(보통 현재 seed) — 항상 매칭으로 간주된다. */
@@ -241,13 +242,14 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         }
         if (dragging) setPan({ x: e.clientX - dragging.x, y: e.clientY - dragging.y });
       }}
-      onMouseUp={() => {
+      onMouseUp={(e) => {
         const nd = nodeDragRef.current;
         if (nd) {
           // 거의 안 움직였으면 click 으로 간주 → navigate
           if (nd.moved < CLICK_THRESHOLD_PX && onNodeNavigate) {
             const node = data.nodes.find((n) => n.id === nd.id);
-            if (node) onNodeNavigate(node);
+            // Cmd(mac)/Ctrl 을 누른 채 클릭하면 새 탭(분할)으로 연다.
+            if (node) onNodeNavigate(node, e.metaKey || e.ctrlKey);
           }
           nodeDragRef.current = null;
         }

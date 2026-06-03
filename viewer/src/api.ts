@@ -85,11 +85,13 @@ export async function fetchErd(opts: ErdRequest): Promise<GraphData> {
 /**
  * IDE 의 해당 클래스 소스로 점프 요청. plugin 모드에서만 의미 있음.
  * 스탠드얼론(브라우저) 에서는 no-op.
+ *
+ * @param split true 면 에디터를 분할해 새 탭으로 연다 (Cmd/Ctrl+클릭).
  */
-export async function navigateToSource(fqn: string): Promise<void> {
+export async function navigateToSource(fqn: string, split = false): Promise<void> {
   const bridge = await awaitBridge();
   if (!bridge) return;
-  await bridge.request("navigate", { fqn });
+  await bridge.request("navigate", { fqn, split });
 }
 
 export async function searchErd(q: string, includeRepositories = true): Promise<GraphNode[]> {

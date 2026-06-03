@@ -7,11 +7,15 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
+import com.intellij.openapi.fileEditor.ex.FileEditorManagerEx
+import com.intellij.openapi.fileEditor.impl.EditorWindow
 import com.intellij.openapi.project.DumbService
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
 import com.intellij.psi.search.GlobalSearchScope
+import javax.swing.SwingConstants
 import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphNode
@@ -35,6 +39,13 @@ class Jpa3dRequestHandler(private val project: Project) {
     private val mapper: ObjectMapper = ObjectMapper()
         .registerModule(KotlinModule.Builder().build())
         .configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false)
+
+    // === Cmd/Ctrl+클릭 2×2 사분면 그리드 상태 (EDT 에서만 접근) ===
+    // 클릭 순서대로 좌상 → 우상 → 좌하 → 우하 4칸을 채우고,
+    // 4칸이 차면 같은 순서로 처음(좌상)부터 순환 재사용한다.
+    private val gridWindows = arrayOfNulls<EditorWindow>(4) // [0]=좌상 [1]=우상 [2]=좌하 [3]=우하
+    private var gridFilled = 0       // 채운 칸 수 (0..4)
+    private var gridRoundRobin = 0   // 4칸이 찬 뒤 순환 재사용 인덱스 (0..3)
 
     fun handle(payload: String): String {
         log.info("bridge request: $payload")
@@ -186,23 +197,87 @@ class Jpa3dRequestHandler(private val project: Project) {
      *
      * - FQN 으로 [PsiClass] 조회 (read action) → EDT 에서 navigate.
      * - dumb mode 에선 인덱스 없이 못 찾을 수 있으니 그 경우 그냥 무시.
+     * - args.split == true (Cmd/Ctrl+클릭) 면 에디터를 세로 분할한 새 탭에 연다.
      */
     private fun handleNavigate(args: Map<String, Any?>?): String {
         val fqn = (args?.get("fqn") as? String)?.trim().orEmpty()
         if (fqn.isEmpty()) return "{\"ok\":false}"
         if (DumbService.isDumb(project)) return "{\"ok\":false,\"reason\":\"dumb\"}"
+        val split = args?.get("split") == true
 
         // PSI 접근은 read action 안에서. navigate 호출은 EDT 에서.
         val psiClass = ReadAction.compute<PsiClass?, RuntimeException> {
             JavaPsiFacade.getInstance(project).findClass(fqn, GlobalSearchScope.allScope(project))
         } ?: return "{\"ok\":false,\"reason\":\"not_found\"}"
 
+        // 분할 모드면 먼저 열어야 할 파일(virtualFile)도 read action 으로 확보.
+        val virtualFile: VirtualFile? = if (split) {
+            ReadAction.compute<VirtualFile?, RuntimeException> {
+                psiClass.containingFile?.virtualFile
+            }
+        } else null
+
         ApplicationManager.getApplication().invokeLater {
-            if (psiClass.canNavigate()) {
+            if (!psiClass.canNavigate()) return@invokeLater
+            if (split && virtualFile != null) {
+                // 2×2 사분면 그리드로 배치(분할/순환 재사용) — 내부에서 navigate 까지 수행.
+                openInGrid(psiClass, virtualFile)
+            } else {
                 psiClass.navigate(true)
             }
         }
         return "{\"ok\":true}"
+    }
+
+    /**
+     * Cmd/Ctrl+클릭 시 2×2 사분면 그리드로 [psiClass] 소스를 배치한다. (EDT 에서 호출)
+     *
+     * 채우는 순서(클릭순): 좌상 → 우상 → 좌하 → 우하.
+     *  - 좌상: 현재 창에 그대로 연다(분할 없음).
+     *  - 우상: 좌상을 세로 분할. (세로 분할은 한 번뿐 → 좌/우 폭 50:50 균등)
+     *  - 좌하: 좌상을 가로 분할.
+     *  - 우하: 우상을 가로 분할 → 2×2 균등 완성.
+     * 4칸이 차면 같은 순서(좌상부터)로 분할 없이 순환 재사용한다.
+     * 저장된 창이 닫혀 있으면 그리드 상태를 새로 시작한다.
+     */
+    private fun openInGrid(psiClass: PsiClass, virtualFile: VirtualFile) {
+        val fem = FileEditorManagerEx.getInstanceEx(project)
+        val live = fem.windows.toHashSet()
+        fun alive(w: EditorWindow?): Boolean = w != null && w in live
+
+        // 채운 칸 중 하나라도 닫혔으면 그리드를 리셋하고 처음부터 다시 구성.
+        if ((0 until gridFilled).any { !alive(gridWindows[it]) }) resetGrid()
+
+        when (gridFilled) {
+            0 -> {
+                // 좌상: 현재(또는 새로 생기는) 창에 열고 그 창을 기록.
+                psiClass.navigate(true)
+                gridWindows[0] = fem.currentWindow
+                gridFilled = 1
+                return
+            }
+            1 -> gridWindows[1] = gridWindows[0]?.split(SwingConstants.VERTICAL, true, virtualFile, true)   // 우상
+            2 -> gridWindows[2] = gridWindows[0]?.split(SwingConstants.HORIZONTAL, true, virtualFile, true) // 좌하
+            3 -> gridWindows[3] = gridWindows[1]?.split(SwingConstants.HORIZONTAL, true, virtualFile, true) // 우하
+            else -> {
+                // 4칸 꽉 참 → 좌상부터 같은 순서로 순환 재사용.
+                val target = gridWindows[gridRoundRobin]
+                gridRoundRobin = (gridRoundRobin + 1) % gridWindows.size
+                if (alive(target)) fem.currentWindow = target
+                psiClass.navigate(true)
+                return
+            }
+        }
+        if (gridFilled < 4) gridFilled++
+        // 분할로 연 새 창에서 해당 클래스 위치로 스크롤.
+        psiClass.navigate(true)
+    }
+
+    /** 분할 그리드 상태 초기화. */
+    private fun resetGrid() {
+        gridWindows.fill(null)
+        gridFilled = 0
+        gridRoundRobin = 0
     }
 
     /** 브리지 페이로드: `{"kind":"...","args":{...}}` */

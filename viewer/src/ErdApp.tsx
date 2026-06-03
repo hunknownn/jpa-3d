@@ -566,7 +566,7 @@ export default function ErdApp() {
               highlightedIds={highlightedIds}
               highlightBaseId={params.seed}
               onNodeReseed={(n) => pickSeed(n)}
-              onNodeNavigate={(n) => navigateToSource(n.id)}
+              onNodeNavigate={(n, split) => navigateToSource(n.id, split)}
             />
             <Legend view="2d" />
           </>
@@ -580,7 +580,7 @@ export default function ErdApp() {
               showColumns={params.showColumns}
               highlightedIds={highlightedIds}
               highlightBaseId={params.seed}
-              onNodeSelect={(n) => navigateToSource(n.id)}
+              onNodeSelect={(n, split) => navigateToSource(n.id, split)}
               onNodeReseed={(n) => pickSeed(n)}
             />
             <Legend view="3d" />
