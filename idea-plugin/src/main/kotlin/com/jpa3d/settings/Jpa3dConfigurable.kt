@@ -64,7 +64,9 @@ class Jpa3dConfigurable : BoundConfigurable("JPA 3D") {
             row("DDL 방언:") {
                 comboBox(
                     DdlDialect.values().toList(),
-                    SimpleListCellRenderer.create("") { it.displayName }
+                    SimpleListCellRenderer.create<DdlDialect> { label, value, _ ->
+                        label.text = value?.displayName ?: ""
+                    }
                 ).bindItem({ state.ddlDialect }, { state.ddlDialect = it ?: DdlDialect.POSTGRES })
             }
             row {

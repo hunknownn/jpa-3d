@@ -1,6 +1,6 @@
 package com.jpa3d.analyzer
 
-import com.intellij.openapi.application.runReadAction
+import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.psi.JavaPsiFacade
@@ -60,7 +60,7 @@ class Jpa3dAnalyzer(private val project: Project) {
         )
     }
 
-    fun analyze(): GraphData = runReadAction {
+    fun analyze(): GraphData = ReadAction.compute<GraphData, RuntimeException> {
         val scope = GlobalSearchScope.projectScope(project)
         val facade = JavaPsiFacade.getInstance(project)
         // 어노테이션 PsiClass 를 찾을 때는 라이브러리 jar 도 포함해야 함 (jakarta.persistence.* 가 거기 있음).

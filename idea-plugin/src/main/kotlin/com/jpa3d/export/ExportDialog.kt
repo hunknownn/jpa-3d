@@ -71,7 +71,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
     private val outputField = TextFieldWithBrowseButton().apply {
         val desc = FileChooserDescriptor(false, true, false, false, false, false)
             .withTitle("Export 폴더 선택")
-        addBrowseFolderListener("Export 폴더", null, project, desc)
+        addBrowseFolderListener(project, desc)
         text = defaultOutputDir(project)
     }
 

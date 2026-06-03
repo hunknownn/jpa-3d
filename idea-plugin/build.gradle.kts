@@ -38,8 +38,9 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
 
     intellijPlatform {
-        // IntelliJ IDEA Community 2024.2 를 타겟. 추후 Ultimate JPA 모듈 의존이 필요해지면 IU 로 전환.
-        intellijIdeaCommunity("2024.2")
+        // IntelliJ IDEA Community 2024.3 를 타겟. 추후 Ultimate JPA 모듈 의존이 필요해지면 IU 로 전환.
+        // (2024.3 = build 243 — addBrowseFolderListener(project, descriptor) 등 정식 API 기준선.)
+        intellijIdeaCommunity("2024.3")
 
         // Java PSI (PsiClass, PsiAnnotation 등) 를 위해 bundled Java plugin 필요.
         // ToolWindow / JCEF 는 platform core 에 있어 추가 의존 불필요.
@@ -67,7 +68,7 @@ dependencies {
 intellijPlatform {
     pluginConfiguration {
         ideaVersion {
-            sinceBuild = "242"
+            sinceBuild = "243"
             untilBuild = provider { null }
         }
     }
