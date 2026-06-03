@@ -31,6 +31,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.3.1</b>
+        <ul>
+          <li><b>3D minimap</b> &mdash; overview of all nodes projected onto the layer plane with the current view box; click to fly the camera there (keeps zoom).</li>
+        </ul>
         <b>0.3.0</b>
         <ul>
           <li><b>Settings page</b> under <i>Settings → Tools → JPA 3D</i> &mdash; persist viewer defaults (view / scope / depth / display options), analysis package include/exclude filters, and Export defaults (DDL dialect / snake_case / DROP TABLE).</li>
