@@ -35,6 +35,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.3.2</b>
+        <ul>
+          <li>Removed deprecated / scheduled-for-removal platform API usages (<code>addBrowseFolderListener</code>, <code>SimpleListCellRenderer.create</code>, <code>runReadAction</code>) for forward compatibility with current and upcoming IDEs.</li>
+          <li>Minimum supported IDE raised to 2024.3 (build 243).</li>
+        </ul>
         <b>0.3.1</b>
         <ul>
           <li><b>3D minimap</b> &mdash; overview of all nodes projected onto the layer plane with the current view box; click to fly the camera there (keeps zoom).</li>
