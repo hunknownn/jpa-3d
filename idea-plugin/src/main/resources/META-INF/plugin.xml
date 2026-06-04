@@ -35,6 +35,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.4.1</b>
+        <ul>
+          <li><b>Fixed split navigation crash on 2025.3 / 2026.1 / 2026.2</b> &mdash; the 2&times;2 grid open (<kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click) referenced an <code>EditorWindow.split</code> overload that became binary-incompatible after a new parameter was added; now calls the stable overload directly.</li>
+          <li>Replaced the deprecated <code>SimpleListCellRenderer.create</code> (scheduled for removal in 2026.2) with <code>textListCellRenderer</code> in the Settings combo box.</li>
+        </ul>
         <b>0.4.0</b>
         <ul>
           <li><b>Multiple centers (seeds)</b> &mdash; the <i>center</i> scope now accepts several seeds at once, mixing entities and packages freely. Search adds each pick as a removable chip; depth is the shortest hop from <i>any</i> selected seed (union BFS).</li>

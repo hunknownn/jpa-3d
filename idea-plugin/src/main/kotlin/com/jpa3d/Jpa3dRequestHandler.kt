@@ -256,9 +256,13 @@ class Jpa3dRequestHandler(private val project: Project) {
                 gridFilled = 1
                 return
             }
-            1 -> gridWindows[1] = gridWindows[0]?.split(SwingConstants.VERTICAL, true, virtualFile, true)   // 우상
-            2 -> gridWindows[2] = gridWindows[0]?.split(SwingConstants.HORIZONTAL, true, virtualFile, true) // 좌하
-            3 -> gridWindows[3] = gridWindows[1]?.split(SwingConstants.HORIZONTAL, true, virtualFile, true) // 우하
+            // fileIsSecondaryComponent(5번째)를 명시해 Kotlin `split$default` 합성 호출을 피한다.
+            // 253/261/262 에서 split 에 forceFocus 파라미터가 추가되며 split$default 디스크립터가
+            // 바뀌어 바이너리 비호환이 발생했다. 5-인자 실제 오버로드는 @JvmOverloads 로 모든
+            // 버전에 존재하므로 직접 호출이 안전하다.
+            1 -> gridWindows[1] = gridWindows[0]?.split(SwingConstants.VERTICAL, true, virtualFile, true, true)   // 우상
+            2 -> gridWindows[2] = gridWindows[0]?.split(SwingConstants.HORIZONTAL, true, virtualFile, true, true) // 좌하
+            3 -> gridWindows[3] = gridWindows[1]?.split(SwingConstants.HORIZONTAL, true, virtualFile, true, true) // 우하
             else -> {
                 // 4칸 꽉 참 → 좌상부터 같은 순서로 순환 재사용.
                 val target = gridWindows[gridRoundRobin]

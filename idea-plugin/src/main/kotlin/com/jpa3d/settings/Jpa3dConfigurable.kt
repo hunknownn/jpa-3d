@@ -2,13 +2,13 @@ package com.jpa3d.settings
 
 import com.intellij.openapi.options.BoundConfigurable
 import com.intellij.openapi.ui.DialogPanel
-import com.intellij.ui.SimpleListCellRenderer
 import com.intellij.ui.dsl.builder.AlignX
 import com.intellij.ui.dsl.builder.bindIntValue
 import com.intellij.ui.dsl.builder.bindItem
 import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
 import com.jpa3d.export.DdlDialect
 
 /**
@@ -64,9 +64,11 @@ class Jpa3dConfigurable : BoundConfigurable("JPA 3D") {
             row("DDL 방언:") {
                 comboBox(
                     DdlDialect.values().toList(),
-                    SimpleListCellRenderer.create<DdlDialect> { label, value, _ ->
-                        label.text = value?.displayName ?: ""
-                    }
+                    // textListCellRenderer 는 243~262 전 버전에 존재하는 비-deprecated DSL.
+                    // (SimpleListCellRenderer.create 는 262 에서 forRemoval 로 표시됨.)
+                    // comboBox 의 renderer 파라미터가 ListCellRenderer<in T?> 라 람다 파라미터를
+                    // nullable 로 받아 T 를 DdlDialect? 로 추론시킨다.
+                    textListCellRenderer { value: DdlDialect? -> value?.displayName ?: "" }
                 ).bindItem({ state.ddlDialect }, { state.ddlDialect = it ?: DdlDialect.POSTGRES })
             }
             row {
