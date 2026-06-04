@@ -108,5 +108,13 @@
                 description="JPA 3D 모델을 JSON / DDL / Mermaid / PNG / SVG 로 export">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
+
+        <!-- 프로젝트 트리에서 패키지 우클릭 → 선택 패키지를 뷰어 중심(시드)으로 추가 -->
+        <action id="JPA3D.AddPackage"
+                class="com.jpa3d.Jpa3dAddPackageAction"
+                text="JPA 3D: 이 패키지 추가"
+                description="선택한 패키지를 JPA 3D 뷰어의 중심으로 추가">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>
