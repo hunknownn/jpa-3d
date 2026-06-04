@@ -18,7 +18,7 @@ In IntelliJ IDEA: <kbd>Settings</kbd> → <kbd>Plugins</kbd> → <kbd>Marketplac
 2. <kbd>Settings</kbd> → <kbd>Plugins</kbd> → ⚙ → <kbd>Install Plugin from Disk…</kbd>
 3. Restart IDE.
 
-Compatible with IntelliJ IDEA 2024.2+ (any edition that bundles the Java plugin).
+Compatible with IntelliJ IDEA 2024.3+ (build 243; any edition that bundles the Java plugin).
 
 ## Usage
 
@@ -31,16 +31,19 @@ Top bar controls:
 
 | Control | What it does |
 |---|---|
-| 전체 / seed 중심 | Show every entity, or only the BFS-reachable subgraph around a seed |
-| 깊이 slider | Adjust the seed neighborhood depth (BFS hops) in real time — client-side, no re-query |
+| 전체 / 중심 (seed) | Show every entity, or only the subgraph reachable from the selected centers |
+| 중심 chips | In 중심 mode, the selected centers — mix of entities and packages — appear as chips; remove individually or clear all |
+| 깊이 slider | Adjust the neighborhood depth (BFS hops) in real time — client-side, no re-query; counts the shortest hop from any selected center |
 | 표시 (관계만 / +컬럼 / +Repository) | Detail level — bare ERD, with columns, or including Spring Data repositories |
 | 상속 ON/OFF | Toggle `EXTENDS` edges (`@MappedSuperclass` chains) |
 | 뷰 3D / 2D | Switch renderer |
-| 검색 input | Type to highlight matching nodes; click a suggestion to reseed |
+| 검색 input | Search entities **and** packages; click a result to add it as a center (in 전체 mode it just highlights matches) |
 
 Other interactions:
 
 - **Click** a node — jump to its source file in the IDE.
+- **<kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+Click** a node — open its source in a 2×2 editor grid, filling four quadrants then cycling, to compare several entities side by side.
+- **Right-click a package** in the Project view → **JPA 3D: 이 패키지 추가** — add that package (with sub-packages) as a center.
 - **Drag** a node (2D view) — manually reposition; click "위치초기화" to undo.
 - **Right-click** a node — set as new seed.
 - **Hover** a column row — highlight all edges connected to that entity.
@@ -60,8 +63,11 @@ Defaults for view/scope/depth, analysis package filters, and Export options live
 ## Features
 
 - **3D force-directed graph** and **2D orthogonal ERD** (elkjs layered layout)
+- **Multiple centers (seeds)** — focus on several entities and packages at once (mixed), each shown as a removable chip; depth is the shortest hop from any of them
+- **Add a package from the Project view** — right-click a package → *JPA 3D: 이 패키지 추가* to center on it (sub-packages included)
+- **Split navigation** — <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click a node to open its source across a 2×2 editor grid
 - **3D minimap** — projected overview of every node with the current view box; click to fly the camera there
-- **Connection depth slider** — adjust the seed neighborhood depth in real time (client-side filtering)
+- **Connection depth slider** — adjust the neighborhood depth in real time (client-side filtering)
 - **Crow's foot cardinality markers** for `@OneToMany`, `@ManyToOne`, `@OneToOne`, `@ManyToMany`
 - **`@Inheritance` strategy badges** (`SINGLE_TABLE` / `JOINED` / `TABLE_PER_CLASS`) with `@DiscriminatorColumn` / `@DiscriminatorValue`
 - **Multi-level Spring Data Repository inheritance** — follows user-defined intermediate interfaces (e.g. `MyBaseRepo<T> extends JpaRepository<T,ID>`)

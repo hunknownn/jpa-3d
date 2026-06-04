@@ -35,6 +35,12 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.4.0</b>
+        <ul>
+          <li><b>Multiple centers (seeds)</b> &mdash; the <i>center</i> scope now accepts several seeds at once, mixing entities and packages freely. Search adds each pick as a removable chip; depth is the shortest hop from <i>any</i> selected seed (union BFS).</li>
+          <li><b>Add a package from the Project view</b> &mdash; right-click a package &rarr; <b>JPA 3D: 이 패키지 추가</b> to open the tool window and add that package (with its sub-packages) as a center.</li>
+          <li><b>Split navigation</b> &mdash; <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+click a node to open its source in a 2&times;2 editor grid, so several entities can be compared side by side.</li>
+        </ul>
         <b>0.3.2</b>
         <ul>
           <li>Removed deprecated / scheduled-for-removal platform API usages (<code>addBrowseFolderListener</code>, <code>SimpleListCellRenderer.create</code>, <code>runReadAction</code>) for forward compatibility with current and upcoming IDEs.</li>
