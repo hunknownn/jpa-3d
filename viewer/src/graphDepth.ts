@@ -12,6 +12,12 @@ import { GraphLink, GraphNode } from "./types";
 
 export const SEED_TYPE_PACKAGE = "package";
 
+/** 다중 시드 한 개 — 엔티티(fqn) 또는 패키지(package) 를 type 으로 구분한다. */
+export interface SeedRef {
+  value: string;
+  type: string; // "fqn" | "package"
+}
+
 /** force-graph 가 link 끝점을 객체로 치환했을 수 있어 양쪽 모양을 모두 받는다. */
 export function endpointId(end: string | { id?: string }): string {
   return typeof end === "string" ? end : (end?.id ?? "");
@@ -29,6 +35,18 @@ export function resolveSeedIds(nodes: GraphNode[], seedType: string, seed: strin
     );
   }
   return new Set(nodes.filter((n) => n.id === seed).map((n) => n.id));
+}
+
+/**
+ * 여러 시드([seeds]) 를 출발 노드 id 집합으로 해석해 합집합으로 돌려준다.
+ * 엔티티(fqn)·패키지(package) 를 자유롭게 섞을 수 있다.
+ */
+export function resolveSeedIdsMulti(nodes: GraphNode[], seeds: SeedRef[]): Set<string> {
+  const out = new Set<string>();
+  for (const s of seeds) {
+    for (const id of resolveSeedIds(nodes, s.type, s.value)) out.add(id);
+  }
+  return out;
 }
 
 /**

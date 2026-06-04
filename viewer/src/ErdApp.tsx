@@ -6,17 +6,15 @@ import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
 import { UI, RADIUS, controlButton } from "./theme";
 import { IconSync, IconSearch } from "./Icons";
-import { bfsDistances, endpointId, resolveSeedIds } from "./graphDepth";
+import { bfsDistances, endpointId, resolveSeedIdsMulti, SeedRef } from "./graphDepth";
 
 type Scope = "all" | "seed";
-type SeedType = "fqn" | "package";
 type ViewMode = "3d" | "2d";
 
 interface ErdParams {
   scope: Scope;
-  seed?: string;
-  /** seed 해석 방식: 단일 엔티티(fqn) vs 패키지+하위(package). */
-  seedType: SeedType;
+  /** 다중 시드 — 엔티티(fqn)/패키지(package) 를 섞어 여러 개. 비어 있으면 미선택. */
+  seeds: SeedRef[];
   /** 컬럼 표시 여부 (관계는 항상 표시). */
   showColumns: boolean;
   /** Repository 노드/USES_ENTITY 엣지 표시 여부 (컬럼과 독립 — "리포지토리만" 가능). */
@@ -44,12 +42,40 @@ function readParamsFromHash(): ErdParams {
   const showColumns = p.get("col") === "1";
   const showRepository = p.get("repo") === "1";
   const depth = parseInt(p.get("depth") ?? "2", 10);
-  const seed = p.get("seed") ?? undefined;
-  const seedType: SeedType = p.get("seedType") === "package" ? "package" : "fqn";
+  const seeds = parseSeeds(p);
   const view: ViewMode = p.get("view") === "2d" ? "2d" : "3d";
   // showExtends 미지정이면 기본 true (기존 동작 유지)
   const showExtends = p.get("extends") !== "0";
-  return { scope, seed, seedType, showColumns, showRepository, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
+  return { scope, seeds, showColumns, showRepository, depth: Number.isFinite(depth) ? depth : 2, view, showExtends };
+}
+
+/**
+ * 해시에서 시드 목록을 파싱한다.
+ *  - 신형: `seeds=fqn:com.app.User,package:com.app.order` (type:value 를 콤마로)
+ *  - 구형(하위호환): 단일 `seed` + `seedType` → 시드 1개로 변환
+ */
+function parseSeeds(p: URLSearchParams): SeedRef[] {
+  const raw = p.get("seeds");
+  if (raw) {
+    return raw
+      .split(",")
+      .map((tok): SeedRef => {
+        const i = tok.indexOf(":");
+        if (i < 0) return { value: tok, type: "fqn" };
+        return { value: tok.slice(i + 1), type: tok.slice(0, i) === "package" ? "package" : "fqn" };
+      })
+      .filter((s) => s.value);
+  }
+  const legacy = p.get("seed");
+  if (legacy) {
+    return [{ value: legacy, type: p.get("seedType") === "package" ? "package" : "fqn" }];
+  }
+  return [];
+}
+
+/** 시드 한 개 동등성. */
+function sameSeed(a: SeedRef, b: SeedRef): boolean {
+  return a.value === b.value && a.type === b.type;
 }
 
 /** plugin(BridgeInjector)이 주입하는 설정 기반 뷰어 기본값. 스탠드얼론(브라우저)에선 없음. */
@@ -71,8 +97,7 @@ function readViewerDefaults(): ErdParams | null {
   if (!d) return null;
   return {
     scope: d.scope === "seed" ? "seed" : "all",
-    seed: undefined,
-    seedType: "fqn",
+    seeds: [],
     showColumns: !!d.col,
     showRepository: !!d.repo,
     showExtends: d.extends !== false,
@@ -89,8 +114,9 @@ function writeParamsToHash(params: ErdParams) {
   p.set("view", params.view);
   if (!params.showExtends) p.set("extends", "0");
   if (params.scope === "seed") {
-    if (params.seed) p.set("seed", params.seed);
-    if (params.seedType === "package") p.set("seedType", "package");
+    if (params.seeds.length) {
+      p.set("seeds", params.seeds.map((s) => `${s.type}:${s.value}`).join(","));
+    }
     p.set("depth", String(params.depth));
   }
   const newHash = `/erd?${p.toString()}`;
@@ -118,7 +144,7 @@ export default function ErdApp() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suggests, setSuggests] = useState<GraphNode[]>([]);
-  const [query, setQuery] = useState(params.seed ?? "");
+  const [query, setQuery] = useState("");
   const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight });
   // 툴바는 좁은 폭에서 wrap 되어 높이가 가변 — 실제 높이를 측정해 그래프 영역 오프셋에 반영.
   // (고정값을 쓰면 wrap 시 좌상단 뷰 토글이 둘째 줄에 가려진다.)
@@ -217,20 +243,41 @@ export default function ErdApp() {
     return () => window.removeEventListener("jpa3d:apply-defaults", onApply);
   }, []);
 
-  // ERD 데이터 fetch — depth 를 **제외한** 입력이 바뀔 때만 재요청한다.
-  // depth 는 FULL_DEPTH 로 연결성분 전체를 받아두고 클라이언트에서 자르므로 fetch 에서 뺀다.
-  // (refreshTick = 동기화/인덱싱 재시도 트리거)
+  // plugin(프로젝트 트리 우클릭 → "이 패키지 추가" 등)에서 시드를 push.
+  // detail: { value: string, type?: "fqn" | "package" } → 중심 모드로 전환하며 시드 추가.
+  // __JPA3D_ADD_SEED_READY__: plugin 이 "리스너가 준비됐는지" 폴링할 수 있게 하는 플래그.
+  // (툴윈도우를 새로 열면 React mount 전에 dispatch 돼 이벤트가 유실될 수 있어서.)
   useEffect(() => {
-    if (params.scope === "seed" && !params.seed) {
+    const onAddSeed = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { value?: string; type?: string } | undefined;
+      if (!detail?.value) return;
+      addSeed({ value: detail.value, type: detail.type === "package" ? "package" : "fqn" });
+    };
+    window.addEventListener("jpa3d:add-seed", onAddSeed);
+    (window as unknown as { __JPA3D_ADD_SEED_READY__?: boolean }).__JPA3D_ADD_SEED_READY__ = true;
+    return () => {
+      window.removeEventListener("jpa3d:add-seed", onAddSeed);
+      delete (window as unknown as { __JPA3D_ADD_SEED_READY__?: boolean }).__JPA3D_ADD_SEED_READY__;
+    };
+    // addSeed 는 setState 함수형 업데이트만 쓰므로 최초 클로저로 안전 — 재구독 불필요.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ERD 데이터 fetch — 다중 시드는 클라이언트에서 필터하므로 항상 **전체 그래프**(envelope)를
+  // 한 번 받아두고, seed/depth 필터는 아래 useMemo 에서 로컬로 적용한다.
+  // 그래서 시드를 추가/제거해도 재요청이 없고(즉시 반응), depth 슬라이더도 재요청 없이 동작한다.
+  // 단, 중심 모드인데 아직 시드가 없으면 빈 캔버스 + 안내만 보이면 되므로 fetch 를 건너뛴다.
+  // (refreshTick = 동기화/인덱싱 재시도 트리거)
+  const skipFetch = params.scope === "seed" && params.seeds.length === 0;
+  useEffect(() => {
+    if (skipFetch) {
       setFullData(EMPTY_DATA);
       return;
     }
     setLoading(true);
     setError(null);
     fetchErd({
-      scope: params.scope,
-      seed: params.seed,
-      seedType: params.seedType,
+      scope: "all",
       depth: FULL_DEPTH,
       showColumns: params.showColumns,
       showRepository: params.showRepository,
@@ -240,27 +287,27 @@ export default function ErdApp() {
       .catch((e) => setError(String(e?.message ?? e)))
       .finally(() => setLoading(false));
   }, [
-    params.scope, params.seed, params.seedType,
+    skipFetch,
     params.showColumns, params.showRepository, params.showExtends,
     refreshTick
   ]);
 
-  // seed 로부터의 홉 거리 + 최대 깊이(슬라이더 상한). 전체 모드면 필터 비활성.
+  // 선택한 모든 시드로부터의 홉 거리(union BFS) + 최대 깊이(슬라이더 상한). 전체 모드면 필터 비활성.
   const { distances, maxDepth } = useMemo(() => {
-    if (params.scope !== "seed" || !params.seed) {
+    if (params.scope !== "seed" || params.seeds.length === 0) {
       return { distances: null as Map<string, number> | null, maxDepth: 0 };
     }
-    const seeds = resolveSeedIds(fullData.nodes, params.seedType, params.seed);
-    const dist = bfsDistances(seeds, fullData.links);
+    const seedIds = resolveSeedIdsMulti(fullData.nodes, params.seeds);
+    const dist = bfsDistances(seedIds, fullData.links);
     let mx = 0;
     for (const v of dist.values()) mx = Math.max(mx, v);
     return { distances: dist, maxDepth: mx };
-  }, [fullData, params.scope, params.seed, params.seedType]);
+  }, [fullData, params.scope, params.seeds]);
 
   // 화면에 보낼 데이터 — envelope 를 현재 depth(홉) 까지 로컬로 자른 부분 그래프.
   // 전체 모드/필터 비활성이면 envelope 그대로.
   const data = useMemo<GraphData>(() => {
-    if (params.scope !== "seed" || !params.seed || !distances) return fullData;
+    if (params.scope !== "seed" || params.seeds.length === 0 || !distances) return fullData;
     const limit = Math.min(params.depth, maxDepth);
     const keepNodes = fullData.nodes.filter((n) => {
       const d = distances.get(n.id);
@@ -271,7 +318,7 @@ export default function ErdApp() {
       (l) => keep.has(endpointId(l.source)) && keep.has(endpointId(l.target))
     );
     return { ...fullData, depth: limit, nodes: keepNodes, links: keepLinks };
-  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seed]);
+  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seeds]);
 
   // 검색
   useEffect(() => {
@@ -289,8 +336,8 @@ export default function ErdApp() {
   const hasEntities = data.nodes.some((n) => n.entity != null);
   const isIndexing = !!data.indexing;
   const showEmpty = !loading && !error && !isIndexing && params.scope === "all" && !hasEntities;
-  // 중심 모드인데 아직 seed 를 고르지 않은 상태 — 빈 캔버스 대신 안내
-  const showSeedPrompt = !loading && !error && !isIndexing && params.scope === "seed" && !params.seed;
+  // 중심 모드인데 아직 시드를 고르지 않은 상태 — 빈 캔버스 대신 안내
+  const showSeedPrompt = !loading && !error && !isIndexing && params.scope === "seed" && params.seeds.length === 0;
 
   // indexing 상태면 3초마다 자동 재요청 — 인덱싱 끝나면 첫 성공 응답에서 멈춤
   useEffect(() => {
@@ -306,26 +353,36 @@ export default function ErdApp() {
       ? new Set(suggests.map((n) => n.id))
       : undefined;
 
-  function pickSeed(n: GraphNode) {
-    // Repository 선택 시: 해당 Repository 가 가리키는 첫 Entity 를 seed 로
-    if (n.entity == null) {
-      const target = fullData.links.find((l) => l.source === n.id && l.relation === "USES_ENTITY")?.target;
-      if (target) {
-        setParams({ ...params, scope: "seed", seedType: "fqn", seed: target });
-        setQuery(target);
-        closeDropdown();
-        return;
+  // 시드 한 개를 추가(중복 무시) 하고 검색창을 비워 다음 입력을 받는다.
+  function addSeed(ref: SeedRef) {
+    setParams((prev) => {
+      if (prev.seeds.some((s) => sameSeed(s, ref))) {
+        return prev.scope === "seed" ? prev : { ...prev, scope: "seed" };
       }
-    }
-    setParams({ ...params, scope: "seed", seedType: "fqn", seed: n.id });
-    setQuery(n.id);
+      return { ...prev, scope: "seed", seeds: [...prev.seeds, ref] };
+    });
+    setQuery("");
     closeDropdown();
   }
 
+  function removeSeed(ref: SeedRef) {
+    setParams((prev) => ({ ...prev, seeds: prev.seeds.filter((s) => !sameSeed(s, ref)) }));
+  }
+
+  function pickSeed(n: GraphNode) {
+    // Repository 선택 시: 해당 Repository 가 가리키는 첫 Entity 를 시드로
+    if (n.entity == null) {
+      const target = fullData.links.find((l) => l.source === n.id && l.relation === "USES_ENTITY")?.target;
+      if (target) {
+        addSeed({ value: target, type: "fqn" });
+        return;
+      }
+    }
+    addSeed({ value: n.id, type: "fqn" });
+  }
+
   function pickPackage(pkg: string) {
-    setParams({ ...params, scope: "seed", seedType: "package", seed: pkg });
-    setQuery(pkg);
-    closeDropdown();
+    addSeed({ value: pkg, type: "package" });
   }
 
   function closeDropdown() {
@@ -345,29 +402,27 @@ export default function ErdApp() {
     return [...set].sort().slice(0, 20);
   }, [suggests, query]);
 
-  const isPkgMode = params.scope === "seed" && params.seedType === "package";
-
-  // 패키지/노드 제안을 단일 리스트로 정규화 — 키보드 탐색을 한 경로로 처리.
+  // 통합 제안: 패키지 + 엔티티/Repository 를 한 리스트로 — 클릭하면 시드로 추가.
+  // 패키지를 위에, 그다음 노드. 키보드 탐색은 한 경로로 처리.
   const items: SuggestItem[] = useMemo(() => {
     if (!query.trim()) return [];
-    if (isPkgMode) {
-      return packageSuggests.map((pkg) => ({
-        key: pkg, primary: pkg, secondary: "패키지 (하위 포함)",
-        onPick: () => pickPackage(pkg)
-      }));
-    }
-    return suggests.map((n) => ({
-      key: n.id,
+    const pkgItems: SuggestItem[] = packageSuggests.map((pkg) => ({
+      key: `pkg:${pkg}`, primary: pkg, secondary: "패키지 (하위 포함)",
+      onPick: () => pickPackage(pkg)
+    }));
+    const nodeItems: SuggestItem[] = suggests.map((n) => ({
+      key: `node:${n.id}`,
       primary: n.name,
       secondary: `${n.entity ? `Entity (${n.entity.kind})` : "Repository"} · ${n.pkg}`,
       onPick: () => pickSeed(n)
     }));
+    return [...pkgItems, ...nodeItems];
     // pickSeed/pickPackage 는 매 렌더 새로 생성되나 클로저 동작은 동일 — deps 에서 의도적으로 제외.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, isPkgMode, packageSuggests, suggests]);
+  }, [query, packageSuggests, suggests]);
 
-  // query/모드 변경 시 활성 인덱스 초기화
-  useEffect(() => { setActiveIndex(-1); }, [query, isPkgMode]);
+  // query 변경 시 활성 인덱스 초기화
+  useEffect(() => { setActiveIndex(-1); }, [query]);
 
   function onSearchKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
@@ -380,9 +435,6 @@ export default function ErdApp() {
     } else if (e.key === "Enter") {
       if (activeIndex >= 0 && activeIndex < items.length) {
         items[activeIndex].onPick();
-      } else if (isPkgMode && query.trim()) {
-        // 패키지 모드: 선택 없이 Enter 면 입력값을 접두 패키지로 바로 적용
-        pickPackage(query.trim());
       }
     } else if (e.key === "Escape") {
       setDropdownOpen(false);
@@ -390,7 +442,7 @@ export default function ErdApp() {
   }
 
   const showDropdown = dropdownOpen && query.trim().length > 0;
-  const showNoResults = showDropdown && !isPkgMode && items.length === 0 && suggests.length === 0;
+  const showNoResults = showDropdown && items.length === 0;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: UI.canvas, color: UI.text }}>
@@ -403,27 +455,20 @@ export default function ErdApp() {
       }}>
         <ScopeToggle value={params.scope} onChange={(scope) => setParams({ ...params, scope })} />
         <Divider />
-        {params.scope === "seed" && (
+        {params.scope === "seed" && params.seeds.length > 0 && (
           <>
-            <SeedTypeToggle
-              value={params.seedType}
-              onChange={(seedType) => {
-                // 기준 전환 시 기존 seed/검색어 초기화 — 엔티티 FQN 과 패키지는 매칭 규칙이 달라서.
-                setParams({ ...params, seedType, seed: undefined });
-                setQuery("");
-              }}
+            <SeedChips
+              seeds={params.seeds}
+              onRemove={removeSeed}
+              onClear={() => setParams({ ...params, seeds: [] })}
             />
             <Divider />
-            {params.seed && (
-              <>
-                <DepthSlider
-                  value={params.depth}
-                  max={maxDepth}
-                  onChange={(depth) => setParams({ ...params, depth })}
-                />
-                <Divider />
-              </>
-            )}
+            <DepthSlider
+              value={params.depth}
+              max={maxDepth}
+              onChange={(depth) => setParams({ ...params, depth })}
+            />
+            <Divider />
           </>
         )}
         <OptionsMenu
@@ -455,9 +500,7 @@ export default function ErdApp() {
             placeholder={
               params.scope !== "seed"
                 ? "노드 검색 (하이라이트)"
-                : isPkgMode
-                  ? "패키지 입력 후 Enter…"
-                  : "중심 엔티티 검색…"
+                : "엔티티·패키지 검색 후 추가…"
             }
             style={{
               width: "100%", padding: "5px 26px 5px 28px", fontSize: 13,
@@ -552,7 +595,7 @@ export default function ErdApp() {
         ) : showEmpty ? (
           <EmptyState />
         ) : showSeedPrompt ? (
-          <SeedPromptState pkgMode={isPkgMode} />
+          <SeedPromptState />
         ) : error ? (
           <ErrorState message={error} onRetry={() => setRefreshTick((t) => t + 1)} />
         ) : params.view === "2d" ? (
@@ -564,7 +607,7 @@ export default function ErdApp() {
               height={size.h - toolbarH}
               showColumns={params.showColumns}
               highlightedIds={highlightedIds}
-              highlightBaseId={params.seed}
+              highlightBaseId={params.seeds[0]?.value}
               onNodeReseed={(n) => pickSeed(n)}
               onNodeNavigate={(n, split) => navigateToSource(n.id, split)}
             />
@@ -579,7 +622,7 @@ export default function ErdApp() {
               height={size.h - toolbarH}
               showColumns={params.showColumns}
               highlightedIds={highlightedIds}
-              highlightBaseId={params.seed}
+              highlightBaseId={params.seeds[0]?.value}
               onNodeSelect={(n, split) => navigateToSource(n.id, split)}
               onNodeReseed={(n) => pickSeed(n)}
             />
@@ -649,14 +692,59 @@ function ScopeToggle({ value, onChange }: { value: Scope; onChange: (v: Scope) =
   );
 }
 
-function SeedTypeToggle({ value, onChange }: { value: SeedType; onChange: (v: SeedType) => void }) {
+/** 짧은 라벨 — 엔티티는 FQN 의 마지막 마디(클래스명), 패키지는 마지막 마디. tooltip 으로 전체. */
+function seedShortLabel(s: SeedRef): string {
+  const last = s.value.split(".").filter(Boolean).pop() ?? s.value;
+  return last || s.value;
+}
+
+/** 선택한 다중 시드를 칩(태그) 목록으로 표시 — 각 ✕ 로 제거, 2개 이상이면 "모두 지우기". */
+function SeedChips({ seeds, onRemove, onClear }: {
+  seeds: SeedRef[];
+  onRemove: (s: SeedRef) => void;
+  onClear: () => void;
+}) {
   return (
-    <div style={groupStyle}>
-      <span style={labelStyle}>기준:</span>
-      <SegGroup>
-        <SegItem first active={value === "fqn"} onClick={() => onChange("fqn")}>엔티티</SegItem>
-        <SegItem active={value === "package"} onClick={() => onChange("package")}>패키지</SegItem>
-      </SegGroup>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", maxWidth: 360 }}>
+      <span style={labelStyle}>중심:</span>
+      {seeds.map((s) => (
+        <span
+          key={`${s.type}:${s.value}`}
+          title={`${s.type === "package" ? "패키지(하위 포함): " : ""}${s.value}`}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 4,
+            height: 22, padding: "0 4px 0 7px", fontSize: 11, lineHeight: 1,
+            background: UI.canvas, color: UI.text,
+            border: `1px solid ${UI.borderStrong}`, borderRadius: 11
+          }}
+        >
+          <span aria-hidden style={{ color: UI.textMuted, fontSize: 10 }}>
+            {s.type === "package" ? "▦" : "◆"}
+          </span>
+          {seedShortLabel(s)}
+          <button
+            onClick={() => onRemove(s)}
+            title="제거"
+            aria-label={`${s.value} 제거`}
+            style={{
+              width: 16, height: 16, lineHeight: "14px", textAlign: "center",
+              background: "transparent", color: UI.textMuted,
+              border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, padding: 0
+            }}
+          >×</button>
+        </span>
+      ))}
+      {seeds.length > 1 && (
+        <button
+          onClick={onClear}
+          title="모든 중심 제거"
+          style={{
+            height: 22, padding: "0 8px", fontSize: 11,
+            background: "transparent", color: UI.textMuted,
+            border: `1px solid ${UI.border}`, borderRadius: 11, cursor: "pointer"
+          }}
+        >모두 지우기</button>
+      )}
     </div>
   );
 }
@@ -896,15 +984,14 @@ function EmptyState() {
   );
 }
 
-function SeedPromptState({ pkgMode }: { pkgMode: boolean }) {
+function SeedPromptState() {
   return (
     <CenterMessage>
       <GraphGlyph />
       <div style={{ fontSize: 18 }}>중심을 선택하세요.</div>
       <div style={{ fontSize: 13 }}>
-        {pkgMode
-          ? "상단 검색창에 패키지를 입력하고 Enter 를 누르면 해당 패키지(하위 포함)를 중심으로 그립니다."
-          : "상단 검색창에서 중심이 될 엔티티를 검색해 선택하면, 그 주변 그래프를 그립니다."}
+        상단 검색창에서 엔티티나 패키지를 검색해 추가하면, 선택한 중심들 주변 그래프를 그립니다.
+        여러 개를 섞어서 추가할 수 있습니다.
       </div>
     </CenterMessage>
   );
