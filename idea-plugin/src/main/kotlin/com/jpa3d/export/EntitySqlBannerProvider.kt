@@ -1,7 +1,7 @@
 package com.jpa3d.export
 
-import com.intellij.icons.AllIcons
 import com.intellij.openapi.fileEditor.FileEditor
+import com.intellij.openapi.fileEditor.TextEditor
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
@@ -11,6 +11,7 @@ import com.intellij.ui.EditorNotificationProvider
 import com.intellij.util.ui.JBUI
 import com.jpa3d.Jpa3dBundle
 import com.jpa3d.Jpa3dIcons
+import com.jpa3d.ViewerSeeder
 import com.jpa3d.settings.Jpa3dEditorConfigurable
 import com.jpa3d.settings.Jpa3dSettings
 import java.awt.BorderLayout
@@ -29,7 +30,7 @@ import javax.swing.JPanel
  *
  * 현재 액션:
  *  - SQL 아이콘 → [EntitySqlExporter] 로 현재 엔티티 DDL 을 읽기전용 탭에 띄움.
- *  - (예정) 뷰어 seed 추가 등 — 왼쪽 아이콘 줄([leftActions])에 항목만 더하면 됨.
+ *  - 눈(보기) 아이콘 → [ViewerSeeder] 로 현재 엔티티를 뷰어 중심(시드)으로 추가.
  * 우측 톱니 → 설정(설정 → 도구 → JPA 3D)을 열어 거터/배너 노출 위치를 바꾼다.
  *
  * 노출 여부는 [Jpa3dSettings.EntitySqlPlacement] 를 따른다(거터 "SQL" 글자 마커
@@ -37,6 +38,9 @@ import javax.swing.JPanel
  *
  * 클릭 가능한 아이콘은 빈 텍스트 action label 로는 히트 영역이 안 잡혀(이전 버그) 동작하지 않았다.
  * 그래서 마우스 리스너를 단 JLabel 을 직접 배치한다 — 왼쪽 줄은 BorderLayout.WEST, 톱니는 myLinksPanel.
+ *
+ * 배경은 알림용 컬러(Status.Info)가 아니라 에디터 본문 배경색을 따른다 — 다크/라이트 어느 테마에서도
+ * 코드 영역과 자연스럽게 이어지는 툴바처럼 보이게 하기 위함.
  */
 class EntitySqlBannerProvider : EditorNotificationProvider, DumbAware {
 
@@ -47,12 +51,17 @@ class EntitySqlBannerProvider : EditorNotificationProvider, DumbAware {
         if (!Jpa3dSettings.getInstance().state.entitySqlPlacement.banner) return null
         val found = EntityClassLocator.find(project, file) ?: return null
         return Function { fileEditor ->
-            object : EditorNotificationPanel(fileEditor, Status.Info) {
+            // 알림용 컬러 배경(Status.Info) 대신 에디터 본문과 같은 배경색을 써서 IDE 테마와 자연스럽게 섞이게 한다.
+            val editorBg = (fileEditor as? TextEditor)?.editor?.colorsScheme?.defaultBackground
+            object : EditorNotificationPanel(fileEditor, editorBg) {
                 init {
                     text = "" // 메인 라벨 비움 — 왼쪽 아이콘 줄을 직접 올린다.
+                    // 기본 배너는 세로 패딩이 커서 키 큰 띠가 된다. 패딩을 줄여 20px 아이콘이 높이를
+                    // 정하는 컴팩트한 툴바형으로 하되, 아이콘이 상/하 경계선에 붙지 않도록 위아래 3px 여유.
+                    border = JBUI.Borders.empty(3, 8)
                     add(leftActions(project, found), BorderLayout.WEST)
                     // 설정(톱니)은 관례대로 우측 끝.
-                    myLinksPanel.add(clickableIcon(AllIcons.General.GearPlain, Jpa3dBundle.message("editor.sql.settings")) {
+                    myLinksPanel.add(clickableIcon(Jpa3dIcons.Gear, Jpa3dBundle.message("editor.sql.settings")) {
                         ShowSettingsUtil.getInstance().showSettingsDialog(project, Jpa3dEditorConfigurable::class.java)
                     })
                 }
@@ -68,7 +77,9 @@ class EntitySqlBannerProvider : EditorNotificationProvider, DumbAware {
             add(clickableIcon(Jpa3dIcons.Sql, Jpa3dBundle.message("editor.sql.tooltip", found.simpleName)) {
                 EntitySqlExporter.export(project, found.fqn, found.simpleName)
             })
-            // 예정: add(clickableIcon(seedIcon, seedTooltip) { 뷰어에 seed 로 추가 })
+            add(clickableIcon(Jpa3dIcons.Seed, Jpa3dBundle.message("editor.seed.tooltip", found.simpleName)) {
+                ViewerSeeder.addEntity(project, found.fqn)
+            })
         }
 
     /** 아이콘 + 핸드 커서 + 툴팁 + 클릭 핸들러를 가진 라벨. */
