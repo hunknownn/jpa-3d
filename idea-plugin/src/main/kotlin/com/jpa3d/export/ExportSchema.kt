@@ -1,5 +1,6 @@
 package com.jpa3d.export
 
+import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
 
 /**
@@ -68,7 +69,17 @@ data class ExportEntity(
     /** 복합(2+ 컬럼) 인덱스 그룹. 단일 컬럼은 [ExportColumn.indexed] 로. */
     val compositeIndexes: List<List<String>> = emptyList(),
     /** 복합(2+ 컬럼) 유니크 제약 그룹. 단일 컬럼은 [ExportColumn.unique] 로. */
-    val compositeUniques: List<List<String>> = emptyList()
+    val compositeUniques: List<List<String>> = emptyList(),
+    /**
+     * 참조 전용 스텁 — FK 대상으로만 모델에 포함된 엔티티. [DdlExporter] 는 이 엔티티의
+     * CREATE TABLE / 인덱스 / 시퀀스 / 자체 FK 를 만들지 않고, **FK 대상 해석에만** 쓴다.
+     * 단일 엔티티 추출([ExportConverter.toSingleEntityModel])에서 추출 범위 밖 연관 테이블이
+     * 이미 존재한다고 가정하고 올바른 FK 제약을 내보내기 위한 장치.
+     *
+     * 내부 DDL 전용 플래그라 JSON 직렬화에서는 제외한다(안정 계약 유지).
+     */
+    @get:JsonIgnore
+    val referenceOnly: Boolean = false
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

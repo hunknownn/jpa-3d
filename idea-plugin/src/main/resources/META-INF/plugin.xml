@@ -100,12 +100,39 @@
 
         <notificationGroup id="JPA 3D Export" displayType="BALLOON"/>
 
-        <!-- 설정 → 도구 → JPA 3D (뷰어/분석/Export 기본값). -->
+        <!-- @Entity → 현재 엔티티만 SQL(DDL) 로 추출. 두 가지 아이콘 표현을 동시에 제공(비교용):
+             (1) 에디터 상단 아이콘형 배너, (2) 클래스 선언 옆 거터 아이콘(Java/Kotlin). -->
+        <editorNotificationProvider implementation="com.jpa3d.export.EntitySqlBannerProvider"/>
+        <codeInsight.lineMarkerProvider language="JAVA"
+            implementationClass="com.jpa3d.export.EntitySqlLineMarkerProvider"/>
+        <codeInsight.lineMarkerProvider language="kotlin"
+            implementationClass="com.jpa3d.export.EntitySqlLineMarkerProvider"/>
+
+        <!-- 설정 → 도구 → JPA 3D. 부모(언어) 아래 Viewer / Analysis / Export / Editor 하위 탭.
+             자식 탭은 displayName 을 두지 않는다 — 정적 displayName 은 IDE 로케일만 따르므로,
+             대신 각 Configurable 의 getDisplayName()(= Jpa3dBundle, 플러그인 언어 설정)이 쓰이게 한다.
+             id 는 유지해 deep-link/검색 안정성 확보. (부모 "JPA 3D"는 브랜드라 정적 유지.) -->
         <applicationConfigurable
             parentId="tools"
             id="com.jpa3d.settings"
             displayName="JPA 3D"
             instance="com.jpa3d.settings.Jpa3dConfigurable"/>
+        <applicationConfigurable
+            parentId="com.jpa3d.settings"
+            id="com.jpa3d.settings.viewer"
+            instance="com.jpa3d.settings.Jpa3dViewerConfigurable"/>
+        <applicationConfigurable
+            parentId="com.jpa3d.settings"
+            id="com.jpa3d.settings.analysis"
+            instance="com.jpa3d.settings.Jpa3dAnalysisConfigurable"/>
+        <applicationConfigurable
+            parentId="com.jpa3d.settings"
+            id="com.jpa3d.settings.export"
+            instance="com.jpa3d.settings.Jpa3dExportConfigurable"/>
+        <applicationConfigurable
+            parentId="com.jpa3d.settings"
+            id="com.jpa3d.settings.editor"
+            instance="com.jpa3d.settings.Jpa3dEditorConfigurable"/>
     </extensions>
 
     <actions>
@@ -123,6 +150,14 @@
                 text="JPA 3D: Export…"
                 description="Export the JPA 3D model to JSON / DDL / Mermaid / PNG / SVG">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+
+        <!-- 에디터 우클릭/단축키로 현재 @Entity 의 SQL 추출 (기본 단축키 없음 — Keymap 에서 할당). -->
+        <action id="JPA3D.ExtractEntitySql"
+                class="com.jpa3d.export.ExtractEntitySqlAction"
+                text="JPA 3D: Extract Entity SQL"
+                description="Extract DDL (SQL) for the JPA entity in the current editor">
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
 
         <!-- 프로젝트 트리에서 패키지 우클릭 → 선택 패키지를 뷰어 중심(시드)으로 추가 -->

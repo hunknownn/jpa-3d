@@ -419,6 +419,175 @@ class ExportPipelineGoldenTest : LightJavaCodeInsightFixtureTestCase() {
             setOf("com.app.order.Order", "com.app.order.OrderItem"), fqns)
     }
 
+    // ===================================================================================
+    // 단일 엔티티 추출 (toSingleEntityModel) — 에디터 상단 "이 엔티티 SQL 추출" 경로
+    // ===================================================================================
+
+    /** 단일 엔티티 모델을 DDL 까지 흘려 quoting 제거한 문자열. */
+    private fun singleDdl(fqn: String): String {
+        val graph = Jpa3dAnalyzer(project).analyze()
+        val model = ExportConverter.toSingleEntityModel(graph, fqn)
+        return DdlExporter(DdlDialect.POSTGRES, snakeCase = true, dropExisting = false)
+            .render(model).replace("\"", "").replace("`", "")
+    }
+
+    fun testSingleEntityIncludesMappedSuperclassButNotUnrelated() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @MappedSuperclass
+            public class BaseEntity {
+                @Id Long id;
+                java.time.LocalDateTime createdAt;
+            }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class User extends BaseEntity { String name; }
+            """.trimIndent()
+        )
+        // 무관한 엔티티 — 단일 추출에 끌려오면 안 됨.
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Product { @Id Long id; }
+            """.trimIndent()
+        )
+        val sql = singleDdl("com.example.User")
+        assertContains(sql, "CREATE TABLE user")
+        // 상속 부모(@MappedSuperclass)의 컬럼이 합쳐져야
+        val userBlock = sql.substringAfter("CREATE TABLE user").substringBefore(");")
+        assertTrue("상속 PK(id) 누락:\n$userBlock", Regex("id\\s+BIGINT").containsMatchIn(userBlock))
+        assertTrue("상속 컬럼 created_at 누락:\n$userBlock", userBlock.contains("created_at"))
+        assertTrue("own 컬럼 name 누락:\n$userBlock", userBlock.contains("name"))
+        // 무관한 엔티티 테이블은 없어야
+        assertFalse("무관 엔티티 Product 가 끌려옴:\n$sql", sql.contains("CREATE TABLE product"))
+    }
+
+    fun testSingleEntityExcludesAssociatedEntityTables() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Purchase {
+                @Id Long id;
+                @ManyToOne @JoinColumn(name = "user_id") User user;
+            }
+            """.trimIndent()
+        )
+        val sql = singleDdl("com.example.Purchase")
+        assertContains(sql, "CREATE TABLE purchase")
+        // @ManyToOne 연관 엔티티 User 의 테이블(CREATE TABLE)은 단일 추출 대상이 아님 (상속이 아니라 연관).
+        assertFalse("연관 엔티티 User 테이블이 끌려옴:\n$sql", sql.contains("CREATE TABLE user"))
+        // 대상 테이블이 모델 밖이어도 FK 컬럼 타입은 전체 그래프의 User.id(Long) 에서 읽어 BIGINT 로 채워야.
+        val purchaseBlock = sql.substringAfter("CREATE TABLE purchase").substringBefore(");")
+        assertTrue("FK 컬럼 user_id 가 대상 PK 타입(BIGINT)으로 해석돼야:\n$purchaseBlock",
+            Regex("user_id\\s+BIGINT").containsMatchIn(purchaseBlock))
+        assertFalse("FK 컬럼이 VARCHAR 폴백으로 떨어짐:\n$purchaseBlock", purchaseBlock.contains("user_id VARCHAR"))
+        // CREATE TABLE 은 없어도 FK 제약은 (대상 테이블이 존재한다고 가정하고) 생성돼야 — 올바른 SQL.
+        assertTrue("FK 제약(REFERENCES user)이 생성돼야:\n$sql",
+            Regex("ALTER TABLE \"?purchase\"? .*FOREIGN KEY \\(\"?user_id\"?\\) REFERENCES \"?user\"? \\(\"?id\"?\\)").containsMatchIn(sql))
+    }
+
+    fun testSingleEntityFkResolvesStringTargetPkTypeAndLength() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Country {
+                @Id @Column(length = 2) String code;
+            }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class City {
+                @Id Long id;
+                @ManyToOne @JoinColumn(name = "country_code") Country country;
+            }
+            """.trimIndent()
+        )
+        val sql = singleDdl("com.example.City")
+        val cityBlock = sql.substringAfter("CREATE TABLE city").substringBefore(");")
+        // 대상 Country.code 가 String(length=2) → FK 컬럼은 VARCHAR(2) 로 해석돼야 (255 폴백 아님).
+        assertTrue("FK 컬럼이 대상 PK 길이까지 반영해야:\n$cityBlock",
+            Regex("country_code\\s+VARCHAR\\(2\\)").containsMatchIn(cityBlock))
+    }
+
+    fun testSingleEntityFkResolvesInheritedTargetPk() {
+        // 대상(Manager)의 PK 는 자기 @Id 가 아니라 JOINED 부모(Employee)에서 상속 — 그래도 FK 타입 해석.
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            @Inheritance(strategy = InheritanceType.JOINED)
+            public class Employee { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Manager extends Employee { String title; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class Department {
+                @Id Long id;
+                @ManyToOne @JoinColumn(name = "manager_id") Manager manager;
+            }
+            """.trimIndent()
+        )
+        val sql = singleDdl("com.example.Department")
+        val deptBlock = sql.substringAfter("CREATE TABLE department").substringBefore(");")
+        assertFalse("연관 대상 Manager 테이블이 끌려옴:\n$sql", sql.contains("CREATE TABLE manager"))
+        // Manager 의 유효 PK = 상속된 Employee.id(Long) → FK 컬럼 BIGINT.
+        assertTrue("상속 PK 대상 FK 가 BIGINT 로 해석돼야:\n$deptBlock",
+            Regex("manager_id\\s+BIGINT").containsMatchIn(deptBlock))
+        // 상속 PK 라도 대상 테이블/컬럼명(manager.id)으로 올바른 FK 제약이 생성돼야.
+        assertTrue("manager_id → manager(id) FK 제약 누락:\n$sql",
+            Regex("FOREIGN KEY \\(manager_id\\) REFERENCES manager \\(id\\)").containsMatchIn(sql))
+    }
+
+    fun testSingleEntityMissingFqnYieldsEmptyDdl() {
+        myFixture.addClass(
+            """
+            package com.example;
+            import jakarta.persistence.*;
+            @Entity
+            public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        val sql = singleDdl("com.example.Ghost")
+        assertFalse("존재하지 않는 FQN 인데 테이블이 생성됨:\n$sql", sql.contains("CREATE TABLE"))
+    }
+
     private fun assertContains(haystack: String, needle: String) {
         assertTrue("'$needle' 가 출력에 없음:\n$haystack", haystack.contains(needle))
     }

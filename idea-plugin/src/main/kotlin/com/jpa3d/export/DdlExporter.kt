@@ -68,9 +68,12 @@ class DdlExporter(
             if (parentOf.isEmpty()) afterAncestor
             else mergeJoinedPk(afterAncestor, parentOf, byFqn)
 
-        // emit 대상: 실제 테이블이 되는 kind="entity" 이면서 SINGLE_TABLE 자식이 아닌 것
-        val emitted = afterJoined.filter { it.kind == "entity" && it.fqn !in skippedFqns }
-        val tableByFqn = emitted.associateBy { it.fqn }
+        // 실 테이블 후보: kind="entity" 이면서 SINGLE_TABLE 자식이 아닌 것.
+        // referenceOnly 스텁(추출 범위 밖 FK 대상)은 FK 해석에는 쓰되 CREATE TABLE 은 만들지 않으므로
+        // tableByFqn(FK 대상 룩업)에는 포함하고 emitted(실제 출력)에서는 제외한다.
+        val realTables = afterJoined.filter { it.kind == "entity" && it.fqn !in skippedFqns }
+        val tableByFqn = realTables.associateBy { it.fqn }
+        val emitted = realTables.filter { !it.referenceOnly }
 
         // ManyToMany owning 관계 → 조인 테이블. 양방향이어도 owning 한쪽만 생성된다.
         val joinTables = model.relations
@@ -444,8 +447,11 @@ class DdlExporter(
         val targetPks = target.columns.filter { it.primaryKey }
         val warn = if (targetPks.size > 1)
             "-- WARNING: target '${target.name}' has composite PK; FK references only first PK column.\n" else ""
+        // 추출 범위 밖 대상이면 그 테이블은 이 스크립트에 없다 — 이미 존재한다고 가정함을 명시.
+        val note = if (target.referenceOnly)
+            "-- NOTE: referenced table '${tableNameOf(target)}' is outside this export; assumed to already exist.\n" else ""
         val targetPk = targetPks.firstOrNull()?.columnName ?: "id"
-        return warn + fkAlterSql(
+        return note + warn + fkAlterSql(
             qualifiedTable(e), id(c.columnName),
             qualifiedTable(target), id(targetPk),
             "fk_${tableNameOf(e)}_${c.columnName}"

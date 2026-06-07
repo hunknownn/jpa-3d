@@ -39,6 +39,20 @@ class Jpa3dSettings : PersistentStateComponent<Jpa3dSettings.State> {
         EN(Locale.ENGLISH);
     }
 
+    /**
+     * `@Entity` 파일에서 "SQL 추출" 진입점을 어디에 노출할지.
+     *  - [BOTH]   : 거터 "SQL" 글자 + 상단 배너 아이콘 (기본)
+     *  - [GUTTER] : 왼쪽 거터 글자만 (상단 밴드를 건드리지 않음)
+     *  - [BANNER] : 상단 배너 아이콘만
+     *  - [OFF]    : 둘 다 끔
+     */
+    enum class EntitySqlPlacement {
+        BOTH, GUTTER, BANNER, OFF;
+
+        val gutter: Boolean get() = this == BOTH || this == GUTTER
+        val banner: Boolean get() = this == BOTH || this == BANNER
+    }
+
     /** 직렬화 대상 — XmlSerializer 규칙상 모든 필드는 `var` + 기본값. */
     class State {
         // === 표시 언어 ===
@@ -64,6 +78,9 @@ class Jpa3dSettings : PersistentStateComponent<Jpa3dSettings.State> {
         var ddlDialect: DdlDialect = DdlDialect.POSTGRES
         var ddlSnakeCase: Boolean = true
         var ddlDropExisting: Boolean = false
+
+        /** `@Entity` 에디터의 "SQL 추출" 아이콘 노출 위치 (거터/배너/둘다/끔). */
+        var entitySqlPlacement: EntitySqlPlacement = EntitySqlPlacement.BOTH
     }
 
     private var myState = State()
