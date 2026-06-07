@@ -136,6 +136,13 @@ tasks.named("processResources") {
     dependsOn(copyViewer)
 }
 
+// buildSearchableOptions 는 설정 UI 인덱싱을 위해 헤드리스 IDE 를 띄우는데,
+// 이미 실행 중인 IDE 인스턴스와 충돌(External instance command received)해 배포 빌드를 깨뜨린다.
+// 검색 옵션 사전 인덱싱은 선택 기능이라 비활성 — 설정 검색은 런타임에 정상 동작한다.
+tasks.named("buildSearchableOptions") {
+    enabled = false
+}
+
 tasks.test {
     useJUnitPlatform()
     // Platform testFramework 가 등록하는 JUnit5TestSessionListener 비활성 — 위 코멘트 참조.
