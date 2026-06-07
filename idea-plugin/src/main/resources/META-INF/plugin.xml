@@ -95,6 +95,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.5.2</b>
+        <ul>
+          <li><b>No more text spilling out of entity cards</b> &mdash; long entity and column names are now truncated with an ellipsis to keep cards uniform. Hover to see the full value: in 2D a tooltip per column row, in 3D the node tooltip lists every column with its full name and type.</li>
+        </ul>
         <b>0.5.1</b>
         <ul>
           <li>Refreshed the Marketplace listing &mdash; clearer description grouped by what each feature is for. No functional changes since 0.5.0.</li>
