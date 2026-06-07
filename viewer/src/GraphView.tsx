@@ -9,6 +9,7 @@ import {
 } from "./theme";
 import { IconFit } from "./Icons";
 import { t, relationLabel, inheritanceLabel } from "./i18n";
+import { fitText, escapeHtml } from "./textFit";
 
 export interface GraphHandle {
   zoomIn(): void;
@@ -130,6 +131,33 @@ function makeCompactLabelSprite(n: GraphNode): THREE.Sprite {
   return sprite;
 }
 
+/**
+ * 노드 hover 툴팁 HTML. 카드 안의 텍스트는 폭에 맞춰 "…" 로 잘리므로, 여기서 전체
+ * 컬럼명/타입을 풀어서 보여준다(잘린 값 보완). 사용자 코드 유래 문자열은 이스케이프.
+ */
+function nodeTooltipHtml(n: GraphNode): string {
+  const stereo = n.stereotypes?.length ? " · @" + n.stereotypes.map(escapeHtml).join(", @") : "";
+  const cols = n.entity?.columns ?? [];
+  const rows = cols.map((c) => {
+    const name = escapeHtml(c.columnName ?? c.fieldName);
+    const type = escapeHtml(shortType3d(c.javaType) + (c.nullable ? "" : "*"));
+    const badge = c.primaryKey ? "PK " : c.foreignKey ? "FK " : "";
+    const badgeHtml = badge ? `<span style="color:#fbbf24">${badge}</span>` : "";
+    return `<div style="display:flex;justify-content:space-between;gap:16px">`
+      + `<span>${badgeHtml}${name}</span>`
+      + `<span style="color:#9aa5b1">${type}</span></div>`;
+  }).join("");
+  const colsHtml = cols.length
+    ? `<div style="margin-top:6px;padding-top:6px;border-top:1px solid #334155;`
+      + `font-family:ui-monospace,monospace;font-size:11px">${rows}</div>`
+    : "";
+  return `<div style="padding:6px 10px;background:#111827;border-radius:6px;max-width:380px">`
+    + `<b>${escapeHtml(n.name)}</b><br/>`
+    + `<span style="color:#9aa5b1">${escapeHtml(n.pkg)}</span><br/>`
+    + `<span style="color:#9aa5b1">${escapeHtml(n.kind)}${stereo}</span>`
+    + `${colsHtml}</div>`;
+}
+
 // === 상세 카드 sprite (가까이서 펼쳐지는 풀 카드: 이름/상속/컬럼) ===
 function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
   const cols = n.entity?.columns ?? [];
@@ -167,18 +195,31 @@ function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
   ctx.fill();
   ctx.restore();
 
+  // 우측 부기(테이블명 또는 "Repository") 폭을 먼저 재 두고, 그만큼 빼서 이름 가용폭을 잡는다.
+  const tableName = n.entity?.tableName;
+  const showTable = isEntity && tableName != null && tableName.toLowerCase() !== n.name.toLowerCase();
+  let headerRightW = 0;
+  if (showTable) {
+    ctx.font = `italic 11px ${CARD_FONT}`;
+    headerRightW = ctx.measureText(tableName!).width;
+  } else if (!isEntity) {
+    ctx.font = `italic 10px ${CARD_FONT}`;
+    headerRightW = ctx.measureText("Repository").width;
+  }
+
+  const headerFont = `600 15px ${CARD_FONT}`;
+  const nameAvail = CARD_W - 12 - 12 - (headerRightW ? headerRightW + 8 : 0);
   ctx.fillStyle = "#f1f5f9";
-  ctx.font = `600 15px ${CARD_FONT}`;
+  ctx.font = headerFont;
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
-  ctx.fillText(n.name, 12, CARD_HEADER_H / 2);
+  ctx.fillText(fitText(n.name, nameAvail, headerFont), 12, CARD_HEADER_H / 2);
 
-  const tableName = n.entity?.tableName;
-  if (isEntity && tableName && tableName.toLowerCase() !== n.name.toLowerCase()) {
+  if (showTable) {
     ctx.fillStyle = "#cbd5e1";
     ctx.font = `italic 11px ${CARD_FONT}`;
     ctx.textAlign = "right";
-    ctx.fillText(tableName, CARD_W - 12, CARD_HEADER_H / 2);
+    ctx.fillText(tableName!, CARD_W - 12, CARD_HEADER_H / 2);
   } else if (!isEntity) {
     ctx.fillStyle = "rgba(255,255,255,0.7)";
     ctx.font = `italic 10px ${CARD_FONT}`;
@@ -215,14 +256,23 @@ function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
       ctx.fillStyle = c.primaryKey ? COLUMN_MARK.pk : COLUMN_MARK.fk;
       ctx.fillText(badge, 12, y);
     }
-    ctx.font = `12px ${CARD_MONO}`;
+    // 우측 블록(◆/# 마커 + 타입) 폭을 먼저 재서 컬럼명 가용폭을 계산 → 충돌/오버플로 방지.
+    const typeStr = shortType3d(c.javaType) + (c.nullable ? "" : "*");
+    const markStr = (c.unique ? "◆ " : "") + (c.indexed ? "# " : "");
+    const colNameFont = `12px ${CARD_MONO}`;
+    ctx.font = `11px ${CARD_MONO}`;
+    const rightW = ctx.measureText(markStr + typeStr).width;
+
+    const nameX = 12 + COL_INDENT;
+    const nameAvail = CARD_W - 12 - nameX - rightW - 6;
+    ctx.font = colNameFont;
     ctx.fillStyle = UI.text;
-    ctx.fillText(c.columnName ?? c.fieldName, 12 + COL_INDENT, y);
+    ctx.textAlign = "left";
+    ctx.fillText(fitText(c.columnName ?? c.fieldName, nameAvail, colNameFont), nameX, y);
 
     ctx.font = `11px ${CARD_MONO}`;
     ctx.textAlign = "right";
     let rx = CARD_W - 12;
-    const typeStr = shortType3d(c.javaType) + (c.nullable ? "" : "*");
     ctx.fillStyle = UI.textMuted;
     ctx.fillText(typeStr, rx, y);
     rx -= ctx.measureText(typeStr).width;
@@ -611,13 +661,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         cooldownTicks={200}
         d3VelocityDecay={0.4}
         onEngineStop={handleEngineStop}
-        nodeLabel={(n: any) => `<div style="padding:4px 8px;background:#111827;border-radius:4px">
-          <b>${(n as GraphNode).name}</b><br/>
-          <span style="color:#9aa5b1">${(n as GraphNode).pkg}</span><br/>
-          <span style="color:#9aa5b1">${(n as GraphNode).kind}${
-            (n as GraphNode).stereotypes?.length ? " · @" + (n as GraphNode).stereotypes.join(", @") : ""
-          }</span>
-        </div>`}
+        nodeLabel={(n: any) => nodeTooltipHtml(n as GraphNode)}
         linkColor={(l: any) => {
           const link = l as GraphLink;
           const base = RELATION_COLOR[link.relation] ?? "#666";

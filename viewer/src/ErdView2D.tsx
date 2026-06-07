@@ -8,6 +8,7 @@ import {
 } from "./theme";
 import { IconDirection, IconFit, IconReset } from "./Icons";
 import { t, relationLabel, inheritanceLabel } from "./i18n";
+import { fitText, measureWidth } from "./textFit";
 
 interface Props {
   data: GraphData;
@@ -68,6 +69,9 @@ const CARD_W = 260;
 const CARD_HEADER_H = 32;
 const INH_BAR_H = 18;
 const ROW_H = 22;
+// 헤더 텍스트는 SVG 기본 sans 를 따른다. fitText 측정 정확도를 위한 근사 폰트 스택
+// (실제와 약간 달라도 보수적으로 잘리는 쪽이라 오버플로는 나지 않는다).
+const HEADER_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
 
 type RankDir = "LR" | "TB";
 
@@ -769,7 +773,12 @@ function EntityCard({ node, x, y, showColumns, dimmed, onHide, onDragStart, onCo
       <rect width={CARD_W} height={h} rx={RADIUS.control} fill={UI.panel} stroke={UI.border} strokeWidth={1.5} />
       <rect width={CARD_W} height={CARD_HEADER_H} rx={RADIUS.control} fill={headerBg} />
       <text x={12} y={CARD_HEADER_H / 2 + 5} fill={UI.textBright} fontSize={15} fontWeight={600}>
-        {node.name}
+        <title>{node.name}{showTableBadge ? ` (${tableName})` : ""}</title>
+        {fitText(
+          node.name,
+          CARD_W - 24 - (showTableBadge ? measureWidth(tableName!, `italic 11px ${HEADER_FONT}`) + 8 : 0),
+          `600 15px ${HEADER_FONT}`,
+        )}
       </text>
       {showTableBadge && (
         <text
@@ -796,37 +805,50 @@ function EntityCard({ node, x, y, showColumns, dimmed, onHide, onDragStart, onCo
           )}
         </g>
       )}
-      {hasColumns && node.entity!.columns.map((c, i) => (
-        <g
-          key={c.fieldName}
-          transform={`translate(0,${columnsY + i * ROW_H})`}
-          onMouseEnter={() => onColumnHover?.(true)}
-          onMouseLeave={() => onColumnHover?.(false)}
-        >
-          {/* 투명 hit area — 글자 사이 빈 공간에서도 hover 가 끊기지 않게 */}
-          <rect x={0} y={0} width={CARD_W} height={ROW_H} fill="transparent" />
-          {/* 컬럼명 — mono 로 세로 정렬. PK/FK 는 색상 텍스트 배지(이모지 대신). */}
-          <text x={12} y={16} fontSize={12} fontFamily={FONT_MONO}>
-            <tspan
-              fontWeight={700}
-              fill={c.primaryKey ? COLUMN_MARK.pk : c.foreignKey ? COLUMN_MARK.fk : UI.textMuted}
-            >
-              {c.primaryKey ? "PK" : c.foreignKey ? "FK" : "  "}
-            </tspan>
-            <tspan dx={8} fill={UI.text}>{c.columnName ?? c.fieldName}</tspan>
-          </text>
-          {/*
-            우측 우편함: [unique ◆] [indexed #] type[* if not nullable]
-            - ◆ : @Column(unique) 또는 @Table(uniqueConstraints) 에 포함
-            - # : @Table(indexes) 의 columnList 에 포함 (PK 의 자동 index 는 제외)
-          */}
-          <text x={CARD_W - 12} y={16} fontSize={11} textAnchor="end" fontFamily={FONT_MONO}>
-            {c.unique && <tspan fill={COLUMN_MARK.unique}>◆ </tspan>}
-            {c.indexed && <tspan fill={COLUMN_MARK.indexed}># </tspan>}
-            <tspan fill={UI.textMuted}>{shortType(c.javaType)}{c.nullable ? "" : "*"}</tspan>
-          </text>
-        </g>
-      ))}
+      {hasColumns && node.entity!.columns.map((c, i) => {
+        const fullName = c.columnName ?? c.fieldName;
+        const typeStr = shortType(c.javaType) + (c.nullable ? "" : "*");
+        // 우측 블록(◆/# 마커 + 타입) 폭과 좌측 PK/FK 배지 폭을 재서 컬럼명 가용폭을 계산.
+        const markStr = (c.unique ? "◆ " : "") + (c.indexed ? "# " : "");
+        const rightW = measureWidth(markStr + typeStr, `11px ${FONT_MONO}`);
+        const badgeW = measureWidth("PK", `700 12px ${FONT_MONO}`);
+        const nameX = 12 + badgeW + 8;
+        const nameAvail = (CARD_W - 12 - rightW) - nameX - 4;
+        const displayName = fitText(fullName, nameAvail, `12px ${FONT_MONO}`);
+        return (
+          <g
+            key={c.fieldName}
+            transform={`translate(0,${columnsY + i * ROW_H})`}
+            onMouseEnter={() => onColumnHover?.(true)}
+            onMouseLeave={() => onColumnHover?.(false)}
+          >
+            {/* 투명 hit area — 글자 사이 빈 공간에서도 hover 가 끊기지 않게 + 풀 텍스트 툴팁 */}
+            <rect x={0} y={0} width={CARD_W} height={ROW_H} fill="transparent">
+              <title>{fullName} : {typeStr}</title>
+            </rect>
+            {/* 컬럼명 — mono 로 세로 정렬. PK/FK 는 색상 텍스트 배지(이모지 대신). */}
+            <text x={12} y={16} fontSize={12} fontFamily={FONT_MONO} style={{ pointerEvents: "none" }}>
+              <tspan
+                fontWeight={700}
+                fill={c.primaryKey ? COLUMN_MARK.pk : c.foreignKey ? COLUMN_MARK.fk : UI.textMuted}
+              >
+                {c.primaryKey ? "PK" : c.foreignKey ? "FK" : "  "}
+              </tspan>
+              <tspan dx={8} fill={UI.text}>{displayName}</tspan>
+            </text>
+            {/*
+              우측 우편함: [unique ◆] [indexed #] type[* if not nullable]
+              - ◆ : @Column(unique) 또는 @Table(uniqueConstraints) 에 포함
+              - # : @Table(indexes) 의 columnList 에 포함 (PK 의 자동 index 는 제외)
+            */}
+            <text x={CARD_W - 12} y={16} fontSize={11} textAnchor="end" fontFamily={FONT_MONO} style={{ pointerEvents: "none" }}>
+              {c.unique && <tspan fill={COLUMN_MARK.unique}>◆ </tspan>}
+              {c.indexed && <tspan fill={COLUMN_MARK.indexed}># </tspan>}
+              <tspan fill={UI.textMuted}>{typeStr}</tspan>
+            </text>
+          </g>
+        );
+      })}
     </g>
   );
 }
