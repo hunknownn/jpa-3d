@@ -4,34 +4,94 @@
     <vendor email="zhfptm12@gmail.com" url="https://github.com/hunknownn">hunknownn</vendor>
 
     <description><![CDATA[
-        Visualize your JPA Entity model as an interactive 3D / 2D ERD inside the IDE.
+        See your JPA entity model the way you reason about it &mdash; as a living graph, right inside the IDE.
+        JPA 3D reads your <code>@Entity</code> classes (Java &amp; Kotlin) and renders them as an interactive
+        <b>3D force-directed graph</b> or a <b>2D orthogonal ERD</b>, so relationships, inheritance, and
+        Spring Data repositories become something you can actually look at, navigate, and share.
         <br/><br/>
-        <b>Features</b>
+
+        <b>JPA 3D is intended to:</b>
         <ul>
-          <li><b>3D force-directed graph</b> with entity-card sprites &amp; 3D depth anchors, plus <b>2D orthogonal ERD</b> (elkjs layered layout)</li>
-          <li><b>3D minimap</b> &mdash; projected overview of every node with the current view box; click to fly the camera there (keeps zoom)</li>
-          <li><b>Connection depth slider</b> &mdash; adjust the seed neighborhood depth in real time (client-side filtering, no re-query)</li>
-          <li><b>Crow's foot cardinality markers</b> for <code>@OneToMany</code>, <code>@ManyToOne</code>, <code>@OneToOne</code>, <code>@ManyToMany</code></li>
-          <li><b>@Inheritance strategy badges</b> (<code>SINGLE_TABLE</code> / <code>JOINED</code> / <code>TABLE_PER_CLASS</code>) with <code>@DiscriminatorColumn</code> / <code>@DiscriminatorValue</code></li>
-          <li><b>Multi-level Spring Data Repository inheritance</b> &mdash; follows user-defined intermediate interfaces (<code>MyBaseRepo&lt;T&gt; extends JpaRepository&lt;T,ID&gt;</code>)</li>
-          <li><b>FK columns</b> on entity cards for <code>@ManyToOne</code> / owning <code>@OneToOne</code> with <code>@JoinColumn</code> name resolution</li>
-          <li><b>@Table indexes / uniqueConstraints</b> rendered as column glyphs (◆ unique, # indexed)</li>
-          <li>Bidirectional relationship deduplication (drops <code>mappedBy</code> mirror edges)</li>
-          <li>Column metadata: PK, FK, nullable, unique, length, <code>@GeneratedValue</code> strategy, <code>@Column(name)</code></li>
-          <li><b>Search match highlighting</b> &mdash; type to fade non-matching nodes</li>
-          <li><b>Column-hover edge highlight</b> &mdash; hover a column row to spotlight that entity's edges</li>
-          <li><b>Manual layout overrides</b> &mdash; drag nodes in 2D; reset anytime</li>
-          <li><b>Background analysis</b> &mdash; cache pre-warmed after indexing, no EDT blocking</li>
-          <li>Java &amp; Kotlin support via UAST &mdash; handles Kotlin's annotation use-site targets transparently</li>
-          <li>Both <code>jakarta.persistence</code> and legacy <code>javax.persistence</code> packages</li>
-          <li><b>Export</b> &mdash; <i>Tools → JPA 3D: Export…</i> to <b>JSON</b>, <b>DDL</b> (PostgreSQL / MySQL / H2 / Oracle, optional snake_case &amp; <code>DROP TABLE</code>), <b>Mermaid</b>, and viewer snapshots (<b>PNG</b> / <b>SVG</b>)</li>
-          <li><b>Settings page</b> under <i>Settings → Tools → JPA 3D</i> &mdash; persist viewer defaults (view / scope / depth / display), analysis package include/exclude filters, and Export defaults</li>
+          <li>Make a large JPA model understandable at a glance &mdash; no more reading annotations file by file</li>
+          <li>Help you trace how entities connect, where the foreign keys are, and how inheritance is mapped</li>
+          <li>Turn your code into shareable artifacts &mdash; diagrams, DDL, and Mermaid &mdash; in a couple of clicks</li>
         </ul>
         <br/>
-        Open the <b>JPA 3D</b> tool window on the right side after the project is indexed.
+
+        <b>JPA 3D delivers:</b>
+        <ul>
+          <li>A 3D / 2D viewer that stays in sync with your source &mdash; click any node to jump to its file</li>
+          <li>Accurate analysis of relationships, cardinality, inheritance, and Spring Data repositories</li>
+          <li>One-click export to JSON, DDL (PostgreSQL / MySQL / H2 / Oracle), Mermaid, and PNG / SVG</li>
+        </ul>
+        <br/>
+
+        It works in any project using <b>Spring Boot</b>, <b>Jakarta EE</b>, or plain JPA &mdash; with both
+        <code>jakarta.persistence</code> and legacy <code>javax.persistence</code>, in <b>Java and Kotlin</b>.
         <br/><br/>
-        <i>한국어:</i> JPA Entity 모델을 IDE 안에서 3D / 2D ERD 로 시각화합니다.
-        Java/Kotlin, jakarta &amp; javax persistence, Spring Data Repository 매핑까지 자동 분석합니다.
+
+        <b>Most loved features</b>
+        <br/><br/>
+
+        <b>Explore your model in 3D &amp; 2D</b>
+        <ul>
+          <li><b>3D force-directed graph</b> with entity-card sprites and depth anchors</li>
+          <li><b>2D orthogonal ERD</b> with clean layered routing (elkjs)</li>
+          <li><b>3D minimap</b> &mdash; a projected overview of every node; click to fly the camera there (keeps zoom)</li>
+          <li><b>Manual layout overrides</b> &mdash; drag nodes in 2D, reset anytime</li>
+        </ul>
+
+        <b>Focus on what matters</b>
+        <ul>
+          <li><b>Centers (seeds)</b> &mdash; focus on several entities and packages at once; each shows as a removable chip</li>
+          <li><b>Connection depth slider</b> &mdash; widen or narrow the neighborhood in real time (client-side, no re-query)</li>
+          <li><b>Add a package from the Project view</b> &mdash; right-click a package to center on it (sub-packages included)</li>
+          <li><b>Search highlighting</b> &mdash; type to fade non-matching nodes; <b>column-hover</b> spotlights an entity's edges</li>
+        </ul>
+
+        <b>Read the mapping accurately</b>
+        <ul>
+          <li><b>Crow's foot cardinality</b> for <code>@OneToMany</code>, <code>@ManyToOne</code>, <code>@OneToOne</code>, <code>@ManyToMany</code></li>
+          <li><b>@Inheritance badges</b> (<code>SINGLE_TABLE</code> / <code>JOINED</code> / <code>TABLE_PER_CLASS</code>) with <code>@DiscriminatorColumn</code> / <code>@DiscriminatorValue</code></li>
+          <li><b>Multi-level Spring Data repository inheritance</b> &mdash; follows custom intermediate interfaces (<code>MyBaseRepo&lt;T&gt; extends JpaRepository&lt;T,ID&gt;</code>)</li>
+          <li><b>FK columns</b> on cards for <code>@ManyToOne</code> / owning <code>@OneToOne</code> with <code>@JoinColumn</code> name resolution</li>
+          <li><b>@Table indexes / uniqueConstraints</b> as column glyphs (◆ unique, # indexed), plus PK / FK / nullable / unique / length / <code>@GeneratedValue</code> / <code>@Column(name)</code></li>
+          <li>Bidirectional relationships are de-duplicated automatically (drops <code>mappedBy</code> mirror edges)</li>
+        </ul>
+
+        <b>Get it out of the IDE</b>
+        <ul>
+          <li><b>Export</b> via <i>Tools → JPA 3D: Export…</i> to <b>JSON</b>, <b>DDL</b> (optional snake_case &amp; <code>DROP TABLE</code>), <b>Mermaid</b>, and viewer snapshots (<b>PNG</b> / <b>SVG</b>)</li>
+          <li><b>Extract single-entity SQL</b> &mdash; an icon on the <code>@Entity</code> editor banner dumps that entity's DDL</li>
+          <li><b>Add to viewer from the editor</b> &mdash; center the graph on the entity you're reading without leaving the file</li>
+        </ul>
+
+        <b>Built to stay out of your way</b>
+        <ul>
+          <li><b>Java &amp; Kotlin</b> via UAST &mdash; Kotlin annotation use-site targets handled transparently</li>
+          <li><b>Background analysis</b> &mdash; the cache pre-warms after indexing, with no UI freezes</li>
+          <li><b>Settings page</b> (<i>Settings → Tools → JPA 3D</i>) &mdash; persist viewer, analysis-filter, and export defaults</li>
+        </ul>
+        <br/>
+
+        <b>Getting started</b>
+        <br/>
+        Open your JPA project, let indexing finish, then open the <b>JPA 3D</b> tool window on the right.
+        Hit <b>Sync</b> to analyze, and start exploring. Enjoy!
+        <br/><br/>
+
+        <i>한국어</i>
+        <br/>
+        JPA 엔티티 모델을 IDE 안에서 <b>3D / 2D ERD</b> 로 시각화하고 탐색하는 플러그인입니다.
+        <code>@Entity</code> 클래스(Java &amp; Kotlin)를 분석해 관계·카디널리티·상속·Spring Data 리포지토리를
+        그래프로 보여주고, 노드를 클릭하면 소스로 바로 이동합니다.
+        <ul>
+          <li><b>3D 포스 그래프 / 2D 직교 ERD</b>, 3D 미니맵, 깊이 슬라이더로 원하는 범위만 집중</li>
+          <li><b>crow's foot 카디널리티</b>, <code>@Inheritance</code> 전략, FK 컬럼, 인덱스/유니크 제약까지 정확히 표현</li>
+          <li><b>다단계 Spring Data 리포지토리 상속</b>과 <code>jakarta</code> / 레거시 <code>javax</code> persistence 모두 지원</li>
+          <li>모델을 <b>JSON / DDL(PostgreSQL · MySQL · H2 · Oracle) / Mermaid / PNG · SVG</b> 로 내보내기</li>
+        </ul>
+        프로젝트 인덱싱 후 우측 <b>JPA 3D</b> 툴윈도우를 열고 동기화하면 됩니다.
     ]]></description>
 
     <change-notes><![CDATA[

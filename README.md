@@ -111,3 +111,7 @@ Requires JDK 21 for the Gradle daemon — pinned in `gradle.properties`.
 ## Acknowledgements
 
 ERD pipeline ported and adapted from [DepScope](https://github.com/hunknownn/DepScope).
+
+## License
+
+[MIT](LICENSE) © hunknownn
