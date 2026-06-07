@@ -1,4 +1,16 @@
-<svg width="20" height="20" viewBox="-1 -1 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M1.5 8C3.6 4.5 5.8 3 8 3C10.2 3 12.4 4.5 14.5 8C12.4 11.5 10.2 13 8 13C5.8 13 3.6 11.5 1.5 8Z" stroke="#C4A2F0" stroke-width="1" stroke-linejoin="round"/>
-  <circle cx="8" cy="8" r="2.4" fill="#C4A2F0"/>
+<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 플러그인 DNA 이중나선(확대) — "JPA 3D 뷰어에 추가". 다크 테마용 밝은 변형. -->
+  <!-- 뒤 strand (보라) -->
+  <path d="M10.5 1.5 C5.7 3.4 5.7 5.3 10.5 7.17 C15.3 9 15.3 11 10.5 12.83 C5.7 14.7 5.7 16.6 10.5 18.5"
+        stroke="#A78BFA" stroke-width="1.8" fill="none" stroke-linecap="round" opacity="0.9"/>
+  <!-- 앞 strand (파랑) -->
+  <path d="M10.5 1.5 C15.3 3.4 15.3 5.3 10.5 7.17 C5.7 9 5.7 11 10.5 12.83 C15.3 14.7 15.3 16.6 10.5 18.5"
+        stroke="#60A5FA" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- 교차점 노드 -->
+  <circle cx="10.5" cy="1.5" r="1.1" fill="#60A5FA"/>
+  <circle cx="10.5" cy="12.83" r="1.1" fill="#A78BFA"/>
+  <circle cx="10.5" cy="18.5" r="1.1" fill="#60A5FA"/>
+  <!-- 좌하단 + : 배경색 헤일로(분리용) 위에 본체 -->
+  <path d="M1.1 12 H6.9 M4 9.1 V14.9" stroke="#1E1F22" stroke-width="3.6" stroke-linecap="round"/>
+  <path d="M1.1 12 H6.9 M4 9.1 V14.9" stroke="#60A5FA" stroke-width="2" stroke-linecap="round"/>
 </svg>

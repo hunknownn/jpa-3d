@@ -10,7 +10,7 @@ object Jpa3dIcons {
     @JvmField
     val Sql = IconLoader.getIcon("/icons/sql.svg", Jpa3dIcons::class.java)
 
-    /** 눈(보기) 아이콘 — 현재 엔티티를 뷰어 중심(시드)으로 추가해 들여다보는 진입점에서 사용. */
+    /** DNA 이중나선 + 좌측 하단 '+' 배지 — 현재 엔티티를 뷰어 중심(시드)으로 추가하는 진입점에서 사용. */
     @JvmField
     val Seed = IconLoader.getIcon("/icons/seed.svg", Jpa3dIcons::class.java)
 

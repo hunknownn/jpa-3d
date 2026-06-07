@@ -30,7 +30,7 @@ import javax.swing.JPanel
  *
  * 현재 액션:
  *  - SQL 아이콘 → [EntitySqlExporter] 로 현재 엔티티 DDL 을 읽기전용 탭에 띄움.
- *  - 눈(보기) 아이콘 → [ViewerSeeder] 로 현재 엔티티를 뷰어 중심(시드)으로 추가.
+ *  - DNA(+) 아이콘 → [ViewerSeeder] 로 현재 엔티티를 뷰어 중심(시드)으로 추가.
  * 우측 톱니 → 설정(설정 → 도구 → JPA 3D)을 열어 거터/배너 노출 위치를 바꾼다.
  *
  * 노출 여부는 [Jpa3dSettings.EntitySqlPlacement] 를 따른다(거터 "SQL" 글자 마커
@@ -78,7 +78,7 @@ class EntitySqlBannerProvider : EditorNotificationProvider, DumbAware {
                 EntitySqlExporter.export(project, found.fqn, found.simpleName)
             })
             add(clickableIcon(Jpa3dIcons.Seed, Jpa3dBundle.message("editor.seed.tooltip", found.simpleName)) {
-                ViewerSeeder.addEntity(project, found.fqn)
+                ViewerSeeder.addEntity(project, found.fqn, found.simpleName)
             })
         }
 
