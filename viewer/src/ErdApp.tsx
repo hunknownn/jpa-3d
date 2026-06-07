@@ -4,7 +4,7 @@ import ErdView2D, { Erd2dHandle } from "./ErdView2D";
 import Legend from "./Legend";
 import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
-import { UI, RADIUS, controlButton } from "./theme";
+import { UI, RADIUS, controlButton, KIND_COLOR, kindKey } from "./theme";
 import { IconSync, IconSearch } from "./Icons";
 import { bfsDistances, endpointId, resolveSeedIdsMulti, SeedRef } from "./graphDepth";
 import { t, setLocale } from "./i18n";
@@ -152,6 +152,8 @@ export default function ErdApp() {
   const [toolbarH, setToolbarH] = useState(TOOLBAR_H);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [refreshTick, setRefreshTick] = useState(0);
+  // 우클릭으로 view 에서 제거한 노드 id 집합 — 툴바 메뉴에서 복원. (URL 비저장, 세션 한정)
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   // 검색 드롭다운: 키보드 탐색 인덱스 + 열림 상태
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -330,18 +332,55 @@ export default function ErdApp() {
   // 화면에 보낼 데이터 — envelope 를 현재 depth(홉) 까지 로컬로 자른 부분 그래프.
   // 전체 모드/필터 비활성이면 envelope 그대로.
   const data = useMemo<GraphData>(() => {
-    if (params.scope !== "seed" || params.seeds.length === 0 || !distances) return fullData;
-    const limit = Math.min(params.depth, maxDepth);
-    const keepNodes = fullData.nodes.filter((n) => {
-      const d = distances.get(n.id);
-      return d != null && d <= limit;
-    });
-    const keep = new Set(keepNodes.map((n) => n.id));
-    const keepLinks = fullData.links.filter(
-      (l) => keep.has(endpointId(l.source)) && keep.has(endpointId(l.target))
+    // 1) scope/depth 로 자른 기본 그래프
+    let base: GraphData;
+    if (params.scope !== "seed" || params.seeds.length === 0 || !distances) {
+      base = fullData;
+    } else {
+      const limit = Math.min(params.depth, maxDepth);
+      const keepNodes = fullData.nodes.filter((n) => {
+        const d = distances.get(n.id);
+        return d != null && d <= limit;
+      });
+      const keep = new Set(keepNodes.map((n) => n.id));
+      const keepLinks = fullData.links.filter(
+        (l) => keep.has(endpointId(l.source)) && keep.has(endpointId(l.target))
+      );
+      base = { ...fullData, depth: limit, nodes: keepNodes, links: keepLinks };
+    }
+    // 2) 우클릭으로 숨긴 노드(+그에 닿는 엣지) 제거
+    if (hiddenIds.size === 0) return base;
+    const nodes = base.nodes.filter((n) => !hiddenIds.has(n.id));
+    const visible = new Set(nodes.map((n) => n.id));
+    const links = base.links.filter(
+      (l) => visible.has(endpointId(l.source)) && visible.has(endpointId(l.target))
     );
-    return { ...fullData, depth: limit, nodes: keepNodes, links: keepLinks };
-  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seeds]);
+    return { ...base, nodes, links };
+  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seeds, hiddenIds]);
+
+  // 숨긴 노드 목록(현재 그래프에 실재하는 것만) — 툴바 복원 메뉴용.
+  const hiddenNodes = useMemo(
+    () => fullData.nodes.filter((n) => hiddenIds.has(n.id)),
+    [fullData, hiddenIds]
+  );
+
+  function hideNode(n: GraphNode) {
+    setHiddenIds((prev) => {
+      const next = new Set(prev);
+      next.add(n.id);
+      return next;
+    });
+  }
+  function restoreNode(id: string) {
+    setHiddenIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+  function restoreAllNodes() {
+    setHiddenIds(new Set());
+  }
 
   // 검색
   useEffect(() => {
@@ -500,6 +539,16 @@ export default function ErdApp() {
           showExtends={params.showExtends}
           onChange={(patch) => setParams({ ...params, ...patch })}
         />
+        {hiddenNodes.length > 0 && (
+          <>
+            <Divider />
+            <HiddenNodesMenu
+              nodes={hiddenNodes}
+              onRestore={restoreNode}
+              onRestoreAll={restoreAllNodes}
+            />
+          </>
+        )}
 
         {/* 검색 — 남는 공간을 차지하다가 좁아지면 다음 줄로 */}
         <div style={{ position: "relative", flex: "1 1 200px", minWidth: 160, maxWidth: 380 }}>
@@ -632,6 +681,7 @@ export default function ErdApp() {
               highlightedIds={highlightedIds}
               highlightBaseId={params.seeds[0]?.value}
               onNodeReseed={(n) => pickSeed(n)}
+              onNodeHide={(n) => hideNode(n)}
               onNodeNavigate={(n, split) => navigateToSource(n.id, split)}
             />
             <Legend view="2d" />
@@ -648,6 +698,7 @@ export default function ErdApp() {
               highlightBaseId={params.seeds[0]?.value}
               onNodeSelect={(n, split) => navigateToSource(n.id, split)}
               onNodeReseed={(n) => pickSeed(n)}
+              onNodeHide={(n) => hideNode(n)}
             />
             <Legend view="3d" />
           </>
@@ -890,6 +941,82 @@ function OptionsMenu({ showColumns, showRepository, showExtends, onChange }: {
   );
 }
 
+/**
+ * "숨김" 드롭다운 — 노드를 우클릭하면 view 에서 제거되고, 이 메뉴에 쌓인다.
+ * 항목을 클릭하면 그 노드만 복원, "모두 복원" 으로 일괄 복원. 숨긴 노드가 없으면 렌더되지 않는다.
+ */
+function HiddenNodesMenu({ nodes, onRestore, onRestoreAll }: {
+  nodes: GraphNode[];
+  onRestore: (id: string) => void;
+  onRestoreAll: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div style={{ ...groupStyle, position: "relative" }}>
+      <span style={labelStyle}>{t("hidden.label")}</span>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title={t("hidden.title")}
+        style={{ ...controlButton, gap: 6, background: open ? UI.panelHover : "transparent" }}
+      >
+        {t("hidden.summary", [nodes.length])}
+        <span style={{ fontSize: 9, color: UI.textMuted }}>{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          {/* 바깥 클릭 닫기 */}
+          <div style={{ position: "fixed", inset: 0, zIndex: 39 }} onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            style={{
+              position: "absolute", top: "calc(100% + 4px)", left: 0, minWidth: 220, maxHeight: 320,
+              overflowY: "auto", zIndex: 40,
+              background: UI.panel, border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.container,
+              padding: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.45)"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 10px" }}>
+              <span style={{ fontSize: 11, color: UI.textMuted }}>{t("hidden.menuTitle")}</span>
+              <button
+                onClick={() => { onRestoreAll(); setOpen(false); }}
+                style={{ background: "transparent", border: "none", color: UI.accent, cursor: "pointer", fontSize: 11 }}
+              >{t("hidden.restoreAll")}</button>
+            </div>
+            {nodes.map((n) => (
+              <button
+                key={n.id}
+                role="menuitem"
+                onClick={() => onRestore(n.id)}
+                title={n.id}
+                aria-label={t("hidden.restore.aria", [n.name])}
+                style={{
+                  display: "flex", alignItems: "center", gap: 8, width: "100%",
+                  padding: "6px 10px", background: "transparent", border: "none",
+                  borderRadius: RADIUS.control, cursor: "pointer", textAlign: "left",
+                  color: UI.text, fontSize: 12
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = UI.panelHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span aria-hidden style={{
+                  width: 10, height: 10, borderRadius: 2, flexShrink: 0,
+                  background: KIND_COLOR[kindKey(n.entity)]
+                }} />
+                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {n.name}
+                </span>
+                <span style={{ color: UI.textMuted, fontSize: 11 }}>{t("hidden.restore")}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** 캔버스 좌상단 오버레이 — 뷰 렌더 모드(3D/2D) 전환. SegGroup 의 panel 배경으로 그래프 위에서도 읽힌다. */
 function ViewModeControl({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
   return (
@@ -921,9 +1048,9 @@ function HelpButton({ open, onToggle }: { open: boolean; onToggle: () => void })
 
 function HelpPopover({ onClose, top }: { onClose: () => void; top: number }) {
   const rows: [string, string][] = [
-    [t("help.k.clickFocus"), t("help.v.clickFocus")],
-    [t("help.k.dblClick3d"), t("help.v.dblClick3d")],
-    [t("help.k.click2d"), t("help.v.click2d")],
+    [t("help.k.click"), t("help.v.click")],
+    [t("help.k.cmdClick"), t("help.v.cmdClick")],
+    [t("help.k.dblClick"), t("help.v.dblClick")],
     [t("help.k.rightClick"), t("help.v.rightClick")],
     [t("help.k.drag2d"), t("help.v.drag2d")],
     [t("help.k.colHover"), t("help.v.colHover")],

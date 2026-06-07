@@ -15,8 +15,11 @@ interface Props {
   height: number;
   /** 컬럼 표시 여부 (관계는 항상 표시). */
   showColumns: boolean;
+  /** 더블 클릭 — 그 노드를 중심(seed)으로 다시 탐색. */
   onNodeReseed: (n: GraphNode) => void;
-  /** @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
+  /** 우클릭 — 그 노드를 view 에서 제거(숨김). */
+  onNodeHide: (n: GraphNode) => void;
+  /** 단일 클릭 — 소스 파일 열기. @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
   onNodeNavigate?: (n: GraphNode, split: boolean) => void;
   /** 검색 매칭 노드 id 집합. 비어있지 않으면 비매칭 노드/엣지를 페이드한다. */
   highlightedIds?: Set<string>;
@@ -111,10 +114,12 @@ export interface Erd2dHandle {
 }
 
 const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
-  data, width, height, showColumns, onNodeReseed, onNodeNavigate,
+  data, width, height, showColumns, onNodeReseed, onNodeHide, onNodeNavigate,
   highlightedIds, highlightBaseId
 }, ref) {
   const svgRef = useRef<SVGSVGElement | null>(null);
+  // 단일/더블 클릭 구분 타이머 — 단일=소스 이동, 더블=중심 보기.
+  const clickTimer = useRef<number | null>(null);
   const hlActive = !!highlightedIds && highlightedIds.size > 0;
   const isHighlighted = (id: string): boolean =>
     !!highlightedIds && (highlightedIds.has(id) || id === highlightBaseId);
@@ -218,6 +223,25 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
     });
   }, [layout, width, height]);
 
+  // 단일=소스 이동 / 더블=중심 보기 / Cmd·Ctrl=분할 에디터. 단일·더블은 250ms 로 구분.
+  function handleNodeClick(node: GraphNode, split: boolean) {
+    if (split) {
+      if (clickTimer.current != null) { window.clearTimeout(clickTimer.current); clickTimer.current = null; }
+      onNodeNavigate?.(node, true);
+      return;
+    }
+    if (clickTimer.current != null) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = null;
+      onNodeReseed(node); // 더블클릭 — 중심 보기
+      return;
+    }
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null;
+      onNodeNavigate?.(node, false); // 단일클릭 — 소스 이동
+    }, 250);
+  }
+
   return (
     <div
       style={{ position: "absolute", inset: 0, overflow: "hidden", background: UI.canvas, cursor: dragging ? "grabbing" : "grab" }}
@@ -246,11 +270,10 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
       onMouseUp={(e) => {
         const nd = nodeDragRef.current;
         if (nd) {
-          // 거의 안 움직였으면 click 으로 간주 → navigate
-          if (nd.moved < CLICK_THRESHOLD_PX && onNodeNavigate) {
+          // 거의 안 움직였으면 click 으로 간주 → 단일=소스, 더블=중심, Cmd/Ctrl=분할.
+          if (nd.moved < CLICK_THRESHOLD_PX) {
             const node = data.nodes.find((n) => n.id === nd.id);
-            // Cmd(mac)/Ctrl 을 누른 채 클릭하면 새 탭(분할)으로 연다.
-            if (node) onNodeNavigate(node, e.metaKey || e.ctrlKey);
+            if (node) handleNodeClick(node, e.metaKey || e.ctrlKey);
           }
           nodeDragRef.current = null;
         }
@@ -417,7 +440,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   if (hovering) setHoverEntityId(n.id);
                   else setHoverEntityId((cur) => (cur === n.id ? null : cur));
                 }}
-                onReseed={() => onNodeReseed(n)}
+                onHide={() => onNodeHide(n)}
                 onDragStart={(clientX, clientY) => {
                   // outer div 의 mousemove/up 이 받아 처리. navigate 는 mouseup 시 movement 보고 결정.
                   nodeDragRef.current = {
@@ -710,10 +733,10 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
   };
 }
 
-function EntityCard({ node, x, y, showColumns, dimmed, onReseed, onDragStart, onColumnHover }: {
+function EntityCard({ node, x, y, showColumns, dimmed, onHide, onDragStart, onColumnHover }: {
   node: GraphNode; x: number; y: number; showColumns: boolean;
   dimmed?: boolean;
-  onReseed: () => void;
+  onHide: () => void;
   onDragStart: (clientX: number, clientY: number) => void;
   onColumnHover?: (hovering: boolean) => void;
 }) {
@@ -740,7 +763,7 @@ function EntityCard({ node, x, y, showColumns, dimmed, onReseed, onDragStart, on
         e.stopPropagation();  // 캔버스 팬 방지
         onDragStart(e.clientX, e.clientY);
       }}
-      onContextMenu={(e) => { e.preventDefault(); onReseed(); }}
+      onContextMenu={(e) => { e.preventDefault(); onHide(); }}
       style={{ cursor: "grab", transition: "opacity 0.15s ease" }}
     >
       <rect width={CARD_W} height={h} rx={RADIUS.control} fill={UI.panel} stroke={UI.border} strokeWidth={1.5} />

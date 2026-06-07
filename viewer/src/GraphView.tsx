@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useReducer, useRef } from "react";
 import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { GraphData, GraphLink, GraphNode } from "./types";
@@ -24,10 +24,12 @@ export interface GraphHandle {
 
 interface Props {
   data: GraphData;
-  /** 더블클릭 — 소스 파일로 이동(2D 와 의미 동일). 단일 클릭은 카메라 포커스라 여기로 오지 않는다. */
-  /** @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
+  /** 단일 클릭 — 소스 파일로 이동(2D 와 동일). @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
   onNodeSelect: (n: GraphNode, split?: boolean) => void;
+  /** 더블 클릭 — 그 노드를 중심(seed)으로 다시 탐색. */
   onNodeReseed: (n: GraphNode) => void;
+  /** 우클릭 — 그 노드를 view 에서 제거(숨김). */
+  onNodeHide: (n: GraphNode) => void;
   highlightedIds?: Set<string>;
   /** 하이라이트의 기준이 된 노드 — highlightedIds 가 활성일 때 항상 포함됨 */
   highlightBaseId?: string;
@@ -51,8 +53,6 @@ const CARD_GAP = 6;       // 박스 상단 ↔ 카드 하단 여백
 // 거리 LOD — 카메라가 LOD_NEAR 보다 가까운 노드만 상세 카드(컬럼)를 펼치고,
 // 그보다 멀면 이름만 있는 compact 라벨을 보여준다. (per-frame onBeforeRender 로 판정)
 const LOD_NEAR = 150;
-// 좌클릭 포커스 시 카메라가 노드에서 떨어질 거리
-const FOCUS_DIST = 82;
 
 // === 카드(상세) 렌더 상수 ===
 const CARD_DPR = 2;
@@ -368,12 +368,10 @@ function computeLayers(nodes: GraphNode[], links: GraphLink[], rootId: string | 
 }
 
 const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
-  { data, onNodeSelect, onNodeReseed, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
+  { data, onNodeSelect, onNodeReseed, onNodeHide, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
   ref
 ) {
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
-  // 좌클릭 포커스: 클릭한 노드 + 직접 이웃을 강조하고 카메라를 그쪽으로 비행.
-  const [focusId, setFocusId] = useState<string | null>(null);
   // 단일/더블 클릭 구분 타이머
   const clickTimer = useRef<number | null>(null);
   // "다음 엔진 정지 때 카메라를 한 번 맞춰야 함" 플래그. 데이터(구조)가 바뀔 때만 켜고,
@@ -463,33 +461,15 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     return (pairCount.get(key) ?? 0) > 1;
   }
 
-  // 검색 하이라이트(외부) 가 활성이면 그것을 우선. 아니면 좌클릭 포커스 이웃을 강조.
+  // 검색 하이라이트(외부) — 매칭 노드/엣지만 강조하고 나머지는 흐리게.
   const searchActive = !!highlightedIds && highlightedIds.size > 0;
-  const focusActive = !searchActive && !!focusId;
-
-  // 포커스 기준 이웃 집합 (자기 자신 포함)
-  const focusNeighbors = useMemo(() => {
-    if (!focusId) return undefined;
-    const s = new Set<string>([focusId]);
-    for (const l of data.links) {
-      if (l.source === focusId) s.add(l.target);
-      if (l.target === focusId) s.add(l.source);
-    }
-    return s;
-  }, [focusId, data]);
-
-  const activeSet = searchActive ? highlightedIds : (focusActive ? focusNeighbors : undefined);
-  const activeBase = searchActive ? highlightBaseId : (focusActive ? focusId ?? undefined : undefined);
+  const activeSet = searchActive ? highlightedIds : undefined;
+  const activeBase = searchActive ? highlightBaseId : undefined;
   const anyActive = !!activeSet && activeSet.size > 0;
 
   const isOn = useCallback((id: string): boolean => {
     return !!activeSet && (activeSet.has(id) || id === activeBase);
   }, [activeSet, activeBase]);
-
-  // 검색이 켜지면 좌클릭 포커스는 해제(혼선 방지).
-  useEffect(() => { if (searchActive) setFocusId(null); }, [searchActive]);
-  // 데이터(중심/범위) 바뀌면 포커스 초기화.
-  useEffect(() => { setFocusId(null); }, [data]);
 
   // 구조(중심/깊이/루트/노드 수)가 바뀌면 다음 정지 때 한 번 카메라 조정.
   // 최초 로드만 전체 fit, 이후 reseed 등은 줌을 유지한 채 새 중심으로 recenter.
@@ -500,40 +480,28 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     loadedRef.current = true;
   }, [data.seed, data.depth, rootId, data.nodes.length]);
 
-  // 카메라를 노드로 비행 — 현재 시선 방향을 유지한 채 FOCUS_DIST 만큼 떨어져 프레이밍.
-  function flyTo(node: any) {
-    const fg = fgRef.current as any;
-    if (!fg || node.x == null) return;
-    const target = { x: node.x, y: node.y, z: node.z };
-    const cam = fg.camera();
-    const dir = new THREE.Vector3(cam.position.x - target.x, cam.position.y - target.y, cam.position.z - target.z);
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
-    dir.normalize().multiplyScalar(FOCUS_DIST);
-    fg.cameraPosition({ x: target.x + dir.x, y: target.y + dir.y, z: target.z + dir.z }, target, 600);
-  }
-
-  // 좌클릭=포커스 / 더블클릭=소스 이동. ForceGraph 는 onNodeClick 만 주므로 직접 판정.
-  // Cmd(mac)/Ctrl + 클릭 → 즉시 새 탭(분할)으로 소스 이동.
+  // 단일클릭=소스 이동 / 더블클릭=중심(seed) 다시 탐색. ForceGraph 는 onNodeClick 만 주므로 직접 판정.
+  // (2D 와 동일한 모델: 단일=소스, Cmd/Ctrl+클릭=소스 분할, 더블=중심 보기)
   function handleNodeClick(n: any, e?: MouseEvent) {
+    const node = n as GraphNode;
+    // Cmd(mac)/Ctrl + 클릭 → 즉시 분할 에디터로 소스 이동.
     if (e && (e.metaKey || e.ctrlKey)) {
       if (clickTimer.current != null) {
         window.clearTimeout(clickTimer.current);
         clickTimer.current = null;
       }
-      onNodeSelect(n as GraphNode, true);
+      onNodeSelect(node, true);
       return;
     }
     if (clickTimer.current != null) {
       window.clearTimeout(clickTimer.current);
       clickTimer.current = null;
-      onNodeSelect(n as GraphNode); // 더블클릭
+      onNodeReseed(node); // 더블클릭 — 중심 보기
       return;
     }
     clickTimer.current = window.setTimeout(() => {
       clickTimer.current = null;
-      const node = n as GraphNode;
-      setFocusId(node.id);
-      flyTo(n); // 단일클릭 — 포커스
+      onNodeSelect(node); // 단일클릭 — 소스 이동
     }, 250);
   }
 
@@ -702,8 +670,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         }) as any}
 
         onNodeClick={(n: any, e: any) => handleNodeClick(n, e)}
-        onNodeRightClick={(n: any) => onNodeReseed(n as GraphNode)}
-        onBackgroundClick={() => setFocusId(null)}
+        onNodeRightClick={(n: any) => onNodeHide(n as GraphNode)}
         enableNodeDrag={false}
 
         nodeThreeObjectExtend={false}
