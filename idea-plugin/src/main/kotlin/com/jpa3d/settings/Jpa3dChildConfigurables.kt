@@ -2,6 +2,7 @@ package com.jpa3d.settings
 
 import com.intellij.codeInsight.daemon.DaemonCodeAnalyzer
 import com.intellij.openapi.options.BoundConfigurable
+import com.intellij.openapi.options.SearchableConfigurable
 import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.ui.DialogPanel
 import com.intellij.ui.EditorNotifications
@@ -16,12 +17,18 @@ import com.jpa3d.Jpa3dBundle
 import com.jpa3d.export.DdlDialect
 
 /**
- * JPA 3D 설정의 하위 탭들. 모두 같은 [Jpa3dSettings] 상태에 바인딩되며, plugin.xml 에서
- * `parentId="com.jpa3d.settings"` 로 부모([Jpa3dConfigurable]) 아래에 등록된다.
+ * JPA 3D 설정의 하위 탭들. 모두 같은 [Jpa3dSettings] 상태에 바인딩되며, 부모
+ * [Jpa3dConfigurable.getConfigurables] 가 직접 제공한다(Composite).
+ *
+ * 탭 이름은 정적 displayName 대신 [Jpa3dBundle](플러그인 언어 설정) 을 따르므로
+ * EP 등록 대신 Composite 로 매단다([Jpa3dConfigurable] 주석 참고). deep-link/검색 안정성을 위해
+ * 각 탭은 [SearchableConfigurable] 로 옛 plugin.xml id 를 [getId] 에 그대로 보존한다.
  */
 
-/** 하위 탭 — 뷰어 기본값. 탭 이름은 plugin.xml 정적 displayName 대신 언어 설정을 따르도록 번들에서. */
-class Jpa3dViewerConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.viewer")) {
+/** 하위 탭 — 뷰어 기본값. 탭 이름은 정적 displayName 대신 언어 설정을 따르도록 번들에서. */
+class Jpa3dViewerConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.viewer")), SearchableConfigurable {
+
+    override fun getId(): String = "com.jpa3d.settings.viewer"
 
     private val state get() = Jpa3dSettings.getInstance().state
 
@@ -48,7 +55,9 @@ class Jpa3dViewerConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.
 }
 
 /** 하위 탭 — 분석 대상 패키지 필터. */
-class Jpa3dAnalysisConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.analysis")) {
+class Jpa3dAnalysisConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.analysis")), SearchableConfigurable {
+
+    override fun getId(): String = "com.jpa3d.settings.analysis"
 
     private val state get() = Jpa3dSettings.getInstance().state
 
@@ -64,7 +73,9 @@ class Jpa3dAnalysisConfigurable : BoundConfigurable(Jpa3dBundle.message("setting
 }
 
 /** 하위 탭 — Export(DDL) 기본값. */
-class Jpa3dExportConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.export")) {
+class Jpa3dExportConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.export")), SearchableConfigurable {
+
+    override fun getId(): String = "com.jpa3d.settings.export"
 
     private val state get() = Jpa3dSettings.getInstance().state
 
@@ -84,7 +95,9 @@ class Jpa3dExportConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.
  * 하위 탭 — 에디터 진입점(거터/배너) 설정. 배너 우측 톱니가 이 탭을 연다.
  * 추후 "표시 항목 × 위치" 표(SQL 추출 / seed 추가 …)로 확장될 자리.
  */
-class Jpa3dEditorConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.editor")) {
+class Jpa3dEditorConfigurable : BoundConfigurable(Jpa3dBundle.message("settings.tab.editor")), SearchableConfigurable {
+
+    override fun getId(): String = "com.jpa3d.settings.editor"
 
     private val state get() = Jpa3dSettings.getInstance().state
 

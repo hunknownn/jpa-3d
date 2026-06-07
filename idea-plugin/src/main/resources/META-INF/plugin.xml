@@ -95,22 +95,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.5.4</b>
+        <ul>
+          <li><b>Fixed a PluginException when opening Settings</b> &mdash; the JPA 3D sub-tabs (Viewer / Analysis / Export / Editor) are now provided as composite children of the parent page instead of separate extension points. The platform no longer logs <code>No display name specified&hellip;</code> nor eagerly loads each tab class, while the tab names still follow the plugin language setting.</li>
+        </ul>
         <b>0.5.3</b>
         <ul>
           <li><b>No more UI freezes on large projects</b> &mdash; the full-project scan now runs as a cancellable non-blocking read action. Previously it held the read lock for the whole scan, so clicking or typing in the editor mid-analysis could freeze the IDE for several seconds; the scan now yields to those actions and retries.</li>
-        </ul>
-        <b>0.5.2</b>
-        <ul>
-          <li><b>No more text spilling out of entity cards</b> &mdash; long entity and column names are now truncated with an ellipsis to keep cards uniform. Hover to see the full value: in 2D a tooltip per column row, in 3D the node tooltip lists every column with its full name and type.</li>
-        </ul>
-        <b>0.5.1</b>
-        <ul>
-          <li>Refreshed the Marketplace listing &mdash; clearer description grouped by what each feature is for. No functional changes since 0.5.0.</li>
-        </ul>
-        <b>0.5.0</b>
-        <ul>
-          <li><b>Add an entity to the viewer from its editor</b> &mdash; the @Entity banner now carries an "add to viewer" icon (DNA helix with a <code>+</code> badge) next to "extract SQL"; clicking it opens the JPA 3D tool window and centers the viewer on that entity.</li>
-          <li><b>Clearer feedback when seeding</b> &mdash; if the entity is still indexing, excluded by analysis package filters, or the tool window is unavailable, a notification explains why instead of opening an empty viewer.</li>
         </ul>
         <b>0.4.1</b>
         <ul>
@@ -185,31 +176,18 @@
         <codeInsight.lineMarkerProvider language="kotlin"
             implementationClass="com.jpa3d.export.EntitySqlLineMarkerProvider"/>
 
-        <!-- 설정 → 도구 → JPA 3D. 부모(언어) 아래 Viewer / Analysis / Export / Editor 하위 탭.
-             자식 탭은 displayName 을 두지 않는다 — 정적 displayName 은 IDE 로케일만 따르므로,
-             대신 각 Configurable 의 getDisplayName()(= Jpa3dBundle, 플러그인 언어 설정)이 쓰이게 한다.
-             id 는 유지해 deep-link/검색 안정성 확보. (부모 "JPA 3D"는 브랜드라 정적 유지.) -->
+        <!-- 설정 → 도구 → JPA 3D. 부모(언어 설정) 노드만 EP 로 등록한다.
+             하위 탭(Viewer / Analysis / Export / Editor)은 Jpa3dConfigurable.getConfigurables()
+             (Configurable.Composite)로 직접 매단다 — 자식 탭 이름이 Jpa3dBundle(플러그인 언어 설정)을
+             따라야 해서 EP 가 요구하는 정적 displayName 을 줄 수 없기 때문. EP 의 displayName 을 비우면
+             플랫폼이 이름만 얻으려 자식 클래스를 강제 로딩하며 PluginException 을 던진다.
+             deep-link/검색 id 는 각 자식의 SearchableConfigurable.getId() 가 보존한다.
+             (부모 "JPA 3D"는 브랜드라 정적 displayName 유지.) -->
         <applicationConfigurable
             parentId="tools"
             id="com.jpa3d.settings"
             displayName="JPA 3D"
             instance="com.jpa3d.settings.Jpa3dConfigurable"/>
-        <applicationConfigurable
-            parentId="com.jpa3d.settings"
-            id="com.jpa3d.settings.viewer"
-            instance="com.jpa3d.settings.Jpa3dViewerConfigurable"/>
-        <applicationConfigurable
-            parentId="com.jpa3d.settings"
-            id="com.jpa3d.settings.analysis"
-            instance="com.jpa3d.settings.Jpa3dAnalysisConfigurable"/>
-        <applicationConfigurable
-            parentId="com.jpa3d.settings"
-            id="com.jpa3d.settings.export"
-            instance="com.jpa3d.settings.Jpa3dExportConfigurable"/>
-        <applicationConfigurable
-            parentId="com.jpa3d.settings"
-            id="com.jpa3d.settings.editor"
-            instance="com.jpa3d.settings.Jpa3dEditorConfigurable"/>
     </extensions>
 
     <actions>
