@@ -95,6 +95,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.5.3</b>
+        <ul>
+          <li><b>No more UI freezes on large projects</b> &mdash; the full-project scan now runs as a cancellable non-blocking read action. Previously it held the read lock for the whole scan, so clicking or typing in the editor mid-analysis could freeze the IDE for several seconds; the scan now yields to those actions and retries.</li>
+        </ul>
         <b>0.5.2</b>
         <ul>
           <li><b>No more text spilling out of entity cards</b> &mdash; long entity and column names are now truncated with an ellipsis to keep cards uniform. Hover to see the full value: in 2D a tooltip per column row, in 3D the node tooltip lists every column with its full name and type.</li>
