@@ -5,8 +5,10 @@ import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.openapi.components.service
+import com.intellij.DynamicBundle
 import com.intellij.util.xmlb.XmlSerializerUtil
 import com.jpa3d.export.DdlDialect
+import java.util.Locale
 
 /**
  * 플러그인 전역(애플리케이션) 설정의 영속 상태.
@@ -22,8 +24,27 @@ import com.jpa3d.export.DdlDialect
 @State(name = "Jpa3dSettings", storages = [Storage("jpa3d.xml")])
 class Jpa3dSettings : PersistentStateComponent<Jpa3dSettings.State> {
 
+    /**
+     * 표시 언어 — 플러그인 UI(다이얼로그/알림/설정)와 뷰어(JCEF)가 함께 따른다.
+     *
+     * [AUTO] 는 IDE 로케일([DynamicBundle.getLocale])을 그대로 따라가고,
+     * 나머지는 IDE 설정과 무관하게 강제로 override 한다. 즉:
+     *  - AUTO + IDE(ko) → ko, AUTO + IDE(en) → en
+     *  - KO  + IDE(en) → ko, EN + IDE(ko) → en
+     */
+    enum class UiLang(val locale: Locale?) {
+        /** IDE 로케일을 따름. */
+        AUTO(null),
+        KO(Locale.KOREAN),
+        EN(Locale.ENGLISH);
+    }
+
     /** 직렬화 대상 — XmlSerializer 규칙상 모든 필드는 `var` + 기본값. */
     class State {
+        // === 표시 언어 ===
+        /** UI 표시 언어. 기본 AUTO = IDE 언어를 따름. */
+        var uiLang: UiLang = UiLang.AUTO
+
         // === 뷰어 기본값 ===
         /** 기본 렌더 뷰: "3d" | "2d". */
         var defaultView: String = "3d"
@@ -58,6 +79,15 @@ class Jpa3dSettings : PersistentStateComponent<Jpa3dSettings.State> {
      * [com.jpa3d.BridgeInjector](페이지 로드 시)와 [com.jpa3d.Jpa3dToolWindowFactory](재오픈 시 push)가
      * 같은 형태를 주입하도록 한 곳에 모은다. 값은 모두 plugin 이 통제하는 안전한 리터럴이라 escape 불필요.
      */
+    /**
+     * 실제 적용 로케일 — override 모델. 설정이 AUTO 면 IDE 로케일, 아니면 강제 값.
+     * 플러그인 번들([com.jpa3d.Jpa3dBundle])과 뷰어 로케일 주입([com.jpa3d.BridgeInjector]) 모두 여기를 본다.
+     */
+    fun effectiveLocale(): Locale = myState.uiLang.locale ?: DynamicBundle.getLocale()
+
+    /** 뷰어로 내려보낼 언어 코드 ("ko" / "en" …). */
+    fun effectiveLanguageTag(): String = effectiveLocale().language
+
     fun viewerDefaultsJson(): String =
         """{"view":"${myState.defaultView}","scope":"${myState.defaultScope}",""" +
             """"depth":${myState.defaultDepth},"col":${myState.showColumns},""" +

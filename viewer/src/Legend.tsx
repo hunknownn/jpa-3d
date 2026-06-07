@@ -1,11 +1,11 @@
 import { useState } from "react";
 import {
-  UI, RELATION_COLOR, RELATION_LABEL, RELATION_DASH,
-  KIND_COLOR, KIND_LABEL,
-  INHERITANCE_COLOR, INHERITANCE_LABEL, COLUMN_MARK, RADIUS
+  UI, RELATION_COLOR, RELATION_DASH,
+  KIND_COLOR, INHERITANCE_COLOR, COLUMN_MARK, RADIUS
 } from "./theme";
 import { IconLegend } from "./Icons";
 import { Relation } from "./types";
+import { t, relationLabel, kindLabel, inheritanceLabel } from "./i18n";
 
 // 화면에 실제로 나타나는 관계만, 의미 순서대로.
 const REL_ORDER: Relation[] = [
@@ -26,7 +26,7 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        title="범례 보기"
+        title={t("legend.button.title")}
         style={{
           padding: "5px 10px", fontSize: 12,
           background: UI.panel, color: UI.textDim,
@@ -34,7 +34,7 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
           display: "flex", alignItems: "center", gap: 6
         }}
       >
-        <IconLegend size={13} /> 범례
+        <IconLegend size={13} /> {t("legend.button")}
       </button>
 
       {open && (
@@ -50,47 +50,47 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
               color: UI.textMuted, fontSize: 11, lineHeight: 1.5,
               marginBottom: 10, paddingBottom: 8, borderBottom: `1px solid ${UI.border}`
             }}>
-              수직 <b style={{ color: UI.text }}>층</b> = 중심에서의 거리(홉). 가까이 가면 카드가 펼쳐집니다.
+              {t("legend.3d.layer.before")}<b style={{ color: UI.text }}>{t("legend.3d.layer.word")}</b>{t("legend.3d.layer.after")}
             </div>
           )}
-          <Section title="관계">
+          <Section title={t("legend.section.relations")}>
             {REL_ORDER.map((rel) => (
               <Row key={rel}
                 swatch={<LineSwatch color={RELATION_COLOR[rel]} dashed={!!RELATION_DASH[rel]} />}
-                label={RELATION_LABEL[rel]}
-                hint={REL_HINT[rel]}
+                label={relationLabel(rel)}
+                hint={relHint(rel)}
               />
             ))}
             <div style={{ color: UI.textMuted, fontSize: 11, marginTop: 4 }}>
               {view === "2d"
-                ? "선 끝 표기 — 막대 │ = 1, 까마귀발 ⪛ = N"
-                : "화살표 방향 = 관계의 향하는 쪽"}
+                ? t("legend.relations.foot.2d")
+                : t("legend.relations.foot.3d")}
             </div>
           </Section>
 
-          <Section title="엔티티 종류">
+          <Section title={t("legend.section.kinds")}>
             {KIND_ORDER.map((k) => (
               <Row key={k}
                 swatch={<BoxSwatch color={KIND_COLOR[k]} />}
-                label={KIND_LABEL[k]}
+                label={kindLabel(k)}
               />
             ))}
           </Section>
 
-          <Section title="컬럼 표기">
-            <Row swatch={<Glyph>🔑</Glyph>} label="기본키 (PK)" />
-            <Row swatch={<Glyph>🔗</Glyph>} label="외래키 (FK)" />
-            <Row swatch={<Glyph color={COLUMN_MARK.unique}>◆</Glyph>} label="unique 제약" />
-            <Row swatch={<Glyph color={COLUMN_MARK.indexed}>#</Glyph>} label="인덱스 포함" />
-            <Row swatch={<Glyph color={UI.textMuted}>*</Glyph>} label="NOT NULL (타입 뒤 *)" />
+          <Section title={t("legend.section.columns")}>
+            <Row swatch={<Glyph>🔑</Glyph>} label={t("legend.col.pk")} />
+            <Row swatch={<Glyph>🔗</Glyph>} label={t("legend.col.fk")} />
+            <Row swatch={<Glyph color={COLUMN_MARK.unique}>◆</Glyph>} label={t("legend.col.unique")} />
+            <Row swatch={<Glyph color={COLUMN_MARK.indexed}>#</Glyph>} label={t("legend.col.indexed")} />
+            <Row swatch={<Glyph color={UI.textMuted}>*</Glyph>} label={t("legend.col.notnull")} />
           </Section>
 
-          <Section title="상속 전략 배지">
+          <Section title={t("legend.section.inheritance")}>
             {INH_ORDER.map((s) => (
               <Row key={s}
                 swatch={<BoxSwatch color={INHERITANCE_COLOR[s]} />}
-                label={INHERITANCE_LABEL[s]}
-                hint={INH_HINT[s]}
+                label={inheritanceLabel(s)}
+                hint={inhHint(s)}
               />
             ))}
           </Section>
@@ -100,20 +100,23 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
   );
 }
 
-const REL_HINT: Partial<Record<Relation, string>> = {
+// 카디널리티 관계의 힌트는 어노테이션명(언어 무관). 구조/참조 관계만 번역.
+const REL_ANNOTATION: Partial<Record<Relation, string>> = {
   ONE_TO_MANY: "@OneToMany",
   MANY_TO_ONE: "@ManyToOne",
   ONE_TO_ONE: "@OneToOne",
-  MANY_TO_MANY: "@ManyToMany",
-  EXTENDS: "상속 / @MappedSuperclass",
-  USES_ENTITY: "Repository → Entity"
+  MANY_TO_MANY: "@ManyToMany"
 };
 
-const INH_HINT: Record<string, string> = {
-  SINGLE_TABLE: "단일 테이블",
-  JOINED: "조인 테이블",
-  TABLE_PER_CLASS: "구체 클래스별 테이블"
-};
+function relHint(rel: Relation): string | undefined {
+  if (rel === "EXTENDS") return t("legend.relHint.EXTENDS");
+  if (rel === "USES_ENTITY") return t("legend.relHint.USES_ENTITY");
+  return REL_ANNOTATION[rel];
+}
+
+function inhHint(strategy: string): string {
+  return t(`legend.inhHint.${strategy}`, undefined, strategy);
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

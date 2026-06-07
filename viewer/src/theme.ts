@@ -37,16 +37,9 @@ export const RELATION_COLOR: Record<Relation, string> = {
   USES_ENTITY: "#94a3b8"    // slate  — 보조(참조, 점선)
 };
 
-/** 엣지에 표기하는 카디널리티/관계 라벨. */
-export const RELATION_LABEL: Record<Relation, string> = {
-  ONE_TO_MANY: "1:N",
-  MANY_TO_ONE: "N:1",
-  ONE_TO_ONE: "1:1",
-  MANY_TO_MANY: "M:N",
-  EXTENDS: "상속",
-  IMPLEMENTS: "구현",
-  USES_ENTITY: "참조"
-};
+// 관계/종류/상속 전략의 **텍스트 라벨**은 i18n 으로 옮겼다(언어별).
+//   relationLabel / kindLabel / inheritanceLabel (./i18n)
+// 색/형태 토큰만 이 파일에 남긴다 — "화면의 색 == 범례의 색" 은 여전히 여기 한 곳에서 보장.
 
 /** 구조/참조 관계는 점선(파선)으로 — 카디널리티(실선)와 시각적으로 분리. */
 export const RELATION_DASH: Partial<Record<Relation, string>> = {
@@ -63,24 +56,11 @@ export const KIND_COLOR = {
   repository: "#64748b"       // slate-500 — 비엔티티(인프라)
 } as const;
 
-export const KIND_LABEL: Record<string, string> = {
-  entity: "Entity",
-  mappedSuperclass: "@MappedSuperclass",
-  embeddable: "@Embeddable",
-  repository: "Repository"
-};
-
 /** @Inheritance 전략 배지 색상/약어 — 세 전략 간 변별만 되면 충분(작은 띠). */
 export const INHERITANCE_COLOR: Record<string, string> = {
   SINGLE_TABLE: "#92400e",   // amber-800
   JOINED: "#6d28d9",         // violet-700
   TABLE_PER_CLASS: "#0e7490" // cyan-700
-};
-
-export const INHERITANCE_LABEL: Record<string, string> = {
-  SINGLE_TABLE: "SINGLE",
-  JOINED: "JOINED",
-  TABLE_PER_CLASS: "TPC"
 };
 
 /** 컬럼 메타 마커 색상 (PK/FK/unique/index) — 카드 내부 인라인. */

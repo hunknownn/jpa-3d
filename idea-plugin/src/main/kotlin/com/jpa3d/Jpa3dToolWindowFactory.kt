@@ -43,18 +43,24 @@ class Jpa3dToolWindowFactory : ToolWindowFactory, DumbAware {
      * 뷰어(ErdApp)는 `jpa3d:apply-defaults` 이벤트를 받아 파라미터를 기본값으로 리셋한다.
      */
     private fun subscribeReapplyDefaults(project: Project, panel: Jpa3dViewerPanel) {
-        // 구독 시점(=최초 생성)의 기본값을 baseline 으로 둬, 첫 표시에서 불필요한 재적용을 막는다.
-        var lastDefaults = Jpa3dSettings.getInstance().viewerDefaultsJson()
+        // 구독 시점(=최초 생성)의 기본값+언어를 baseline 으로 둬, 첫 표시에서 불필요한 재적용을 막는다.
+        // 언어도 함께 추적해, 언어 설정만 바꾸고 재오픈해도 살아있는 뷰어에 반영되게 한다.
+        fun snapshot(): Pair<String, String> = Jpa3dSettings.getInstance().let {
+            it.viewerDefaultsJson() to it.effectiveLanguageTag()
+        }
+        var last = snapshot()
         project.messageBus.connect(panel).subscribe(
             ToolWindowManagerListener.TOPIC,
             object : ToolWindowManagerListener {
                 override fun toolWindowShown(toolWindow: ToolWindow) {
                     if (toolWindow.id != TOOL_WINDOW_ID) return
-                    val now = Jpa3dSettings.getInstance().viewerDefaultsJson()
-                    if (now == lastDefaults) return
-                    lastDefaults = now
+                    val now = snapshot()
+                    if (now == last) return
+                    last = now
+                    val (defaultsJson, locale) = now
                     val browser = project.service<Jpa3dBrowserHolder>().browser ?: return
-                    val js = "window.__JPA3D_DEFAULTS__ = $now; " +
+                    val js = "window.__JPA3D_DEFAULTS__ = $defaultsJson; " +
+                        "window.__JPA3D_LOCALE__ = \"$locale\"; " +
                         "window.dispatchEvent(new CustomEvent('jpa3d:apply-defaults'));"
                     browser.cefBrowser.executeJavaScript(js, "", 0)
                 }

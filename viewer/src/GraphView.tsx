@@ -3,11 +3,12 @@ import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { GraphData, GraphLink, GraphNode } from "./types";
 import {
-  UI, RELATION_COLOR, RELATION_LABEL,
-  INHERITANCE_COLOR, INHERITANCE_LABEL, KIND_COLOR, COLUMN_MARK, hexToRgba, kindKey,
+  UI, RELATION_COLOR,
+  INHERITANCE_COLOR, KIND_COLOR, COLUMN_MARK, hexToRgba, kindKey,
   FONT_MONO, controlButton, RADIUS
 } from "./theme";
 import { IconFit } from "./Icons";
+import { t, relationLabel, inheritanceLabel } from "./i18n";
 
 export interface GraphHandle {
   zoomIn(): void;
@@ -187,7 +188,7 @@ function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
 
   if (inh) {
     const inhColor = INHERITANCE_COLOR[inh.strategy] ?? UI.borderStrong;
-    const inhLabel = INHERITANCE_LABEL[inh.strategy] ?? inh.strategy;
+    const inhLabel = inheritanceLabel(inh.strategy);
     ctx.fillStyle = inhColor;
     ctx.globalAlpha = 0.85;
     ctx.fillRect(0, CARD_HEADER_H, CARD_W, CARD_INH_H);
@@ -662,7 +663,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
           const s = endpointId((l as any).source);
           const t = endpointId((l as any).target);
           return `<div style="padding:3px 7px;background:#111827;border-radius:4px;font-size:12px">
-            <b style="color:${RELATION_COLOR[link.relation] ?? "#aaa"}">${RELATION_LABEL[link.relation] ?? link.relation}</b>
+            <b style="color:${RELATION_COLOR[link.relation] ?? "#aaa"}">${relationLabel(link.relation)}</b>
             <span style="color:#9aa5b1"> · ${s.split(".").pop()} → ${t.split(".").pop()}</span>
           </div>`;
         }}
@@ -689,7 +690,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
           const t = endpointId((l as any).target);
           if (!(isOn(s) && isOn(t))) return undefined as any;
           const rel = (l as GraphLink).relation;
-          return makeLinkLabelSprite(RELATION_LABEL[rel] ?? rel, RELATION_COLOR[rel] ?? "#aaa");
+          return makeLinkLabelSprite(relationLabel(rel), RELATION_COLOR[rel] ?? "#aaa");
         }) : undefined) as any}
         linkPositionUpdate={((sprite: any, { start, end }: any) => {
           if (!sprite) return;
@@ -724,9 +725,9 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         display: "flex", gap: 4, background: UI.panel, padding: 4,
         borderRadius: RADIUS.control, border: `1px solid ${UI.border}`
       }}>
-        <button style={ctrlBtnStyle} title="축소" onClick={() => zoomBy(1.25)}>−</button>
-        <button style={ctrlBtnStyle} title="확대" onClick={() => zoomBy(0.8)}>+</button>
-        <button style={ctrlBtnStyle} title="전체 보기 (화면에 맞춤)" aria-label="전체 보기" onClick={() => fgRef.current?.zoomToFit(400, 80)}><IconFit /></button>
+        <button style={ctrlBtnStyle} title={t("ctrl.zoomOut")} onClick={() => zoomBy(1.25)}>−</button>
+        <button style={ctrlBtnStyle} title={t("ctrl.zoomIn")} onClick={() => zoomBy(0.8)}>+</button>
+        <button style={ctrlBtnStyle} title={t("ctrl.fit")} aria-label={t("ctrl.fit.aria")} onClick={() => fgRef.current?.zoomToFit(400, 80)}><IconFit /></button>
       </div>
     </div>
   );

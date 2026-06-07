@@ -35,7 +35,7 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
 
     init {
         if (!JBCefApp.isSupported()) {
-            component = JLabel("이 IDE 빌드는 JCEF 를 지원하지 않습니다.", SwingConstants.CENTER)
+            component = JLabel(Jpa3dBundle.message("viewer.jcefUnsupported"), SwingConstants.CENTER)
         } else {
             // JBCefClient 의 JS_QUERY_POOL_SIZE 는 브라우저 생성 *전* 에 설정해야 한다.
             // 기본값은 BridgeInjector 의 jsQuery 1개로 다 쓰여서, 그 후의 동적

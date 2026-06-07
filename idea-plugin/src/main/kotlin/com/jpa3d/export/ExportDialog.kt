@@ -13,6 +13,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.util.ui.FormBuilder
 import com.intellij.util.ui.JBUI
 import com.jpa3d.Jpa3dBrowserHolder
+import com.jpa3d.Jpa3dBundle
 import com.jpa3d.model.GraphScope
 import com.intellij.ui.components.panels.VerticalLayout
 import java.awt.BorderLayout
@@ -38,14 +39,14 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
     // DDL 관련 초기값은 설정(설정 → 도구 → JPA 3D)의 Export 기본값에서 가져온다.
     private val settings = com.jpa3d.settings.Jpa3dSettings.getInstance().state
 
-    private val cbJson = JCheckBox("JSON (단순화 스키마)", true)
-    private val cbDdl = JCheckBox("DDL (SQL)", true)
-    private val cbMermaid = JCheckBox("Mermaid (.mmd)", true)
-    private val cbSnapshotPng = JCheckBox("PNG (2D · 3D)", false)
-    private val cbSnapshotSvg = JCheckBox("SVG (2D 뷰만)", false)
+    private val cbJson = JCheckBox(Jpa3dBundle.message("export.format.json"), true)
+    private val cbDdl = JCheckBox(Jpa3dBundle.message("export.format.ddl"), true)
+    private val cbMermaid = JCheckBox(Jpa3dBundle.message("export.format.mermaid"), true)
+    private val cbSnapshotPng = JCheckBox(Jpa3dBundle.message("export.format.png"), false)
+    private val cbSnapshotSvg = JCheckBox(Jpa3dBundle.message("export.format.svg"), false)
 
-    private val cbSnakeCase = JCheckBox("snake_case 이름 변환 (UserAccount → user_account)", settings.ddlSnakeCase)
-    private val cbDropExisting = JCheckBox("DROP TABLE IF EXISTS 헤더 추가 (재실행 안전)", settings.ddlDropExisting)
+    private val cbSnakeCase = JCheckBox(Jpa3dBundle.message("settings.export.snakeCase"), settings.ddlSnakeCase)
+    private val cbDropExisting = JCheckBox(Jpa3dBundle.message("settings.export.dropExisting"), settings.ddlDropExisting)
 
     private val dialectCombo = JComboBox(DdlDialect.values()).apply {
         setRenderer { list, value, _, isSelected, _ ->
@@ -59,10 +60,13 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         selectedItem = settings.ddlDialect
     }
 
-    private val rbAll = JRadioButton("전체 모델", true)
-    private val rbCurrent = JRadioButton("현재 뷰 (seed + depth)", false)
+    private val rbAll = JRadioButton(Jpa3dBundle.message("export.scope.all"), true)
+    private val rbCurrent = JRadioButton(Jpa3dBundle.message("export.scope.current"), false)
     // seed 해석 방식. 표시 라벨 → GraphScope seedType 값.
-    private val seedTypeLabels = arrayOf("엔티티 FQN", "패키지")
+    private val seedTypeLabels = arrayOf(
+        Jpa3dBundle.message("export.seedType.fqn"),
+        Jpa3dBundle.message("export.seedType.package")
+    )
     private val seedTypeValues = arrayOf(GraphScope.SEED_TYPE_FQN, GraphScope.SEED_TYPE_PACKAGE)
     private val seedTypeCombo = JComboBox(seedTypeLabels)
     private val seedField = JBTextField()
@@ -70,7 +74,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
 
     private val outputField = TextFieldWithBrowseButton().apply {
         val desc = FileChooserDescriptor(false, true, false, false, false, false)
-            .withTitle("Export 폴더 선택")
+            .withTitle(Jpa3dBundle.message("export.folderChooser.title"))
         addBrowseFolderListener(project, desc)
         text = defaultOutputDir(project)
     }
@@ -80,8 +84,8 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
     }
 
     init {
-        title = "JPA 3D — Export"
-        setOKButtonText("Export")
+        title = Jpa3dBundle.message("export.dialog.title")
+        setOKButtonText(Jpa3dBundle.message("export.dialog.okButton"))
         init()
 
         // 방언 콤보 + DDL 옵션은 DDL 체크가 켜진 경우만, seed 입력은 '현재 뷰' 범위일 때만 활성화.
@@ -108,8 +112,8 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         val browser = project.service<Jpa3dBrowserHolder>().browser ?: run {
             cbSnapshotPng.isEnabled = false
             cbSnapshotSvg.isEnabled = false
-            cbSnapshotPng.text = "PNG (viewer 미열림)"
-            cbSnapshotSvg.text = "SVG (viewer 미열림)"
+            cbSnapshotPng.text = Jpa3dBundle.message("export.format.png.noViewer")
+            cbSnapshotSvg.text = Jpa3dBundle.message("export.format.svg.noViewer")
             return
         }
         ApplicationManager.getApplication().executeOnPooledThread {
@@ -118,7 +122,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
                 if (mode == "3d") {
                     cbSnapshotSvg.isSelected = false
                     cbSnapshotSvg.isEnabled = false
-                    cbSnapshotSvg.text = "SVG (3D 뷰에선 미지원)"
+                    cbSnapshotSvg.text = Jpa3dBundle.message("export.format.svg.no3d")
                 }
             }
         }
@@ -126,7 +130,7 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
 
     override fun createCenterPanel(): JComponent {
         val dialectPanel = JPanel(BorderLayout(8, 0)).apply {
-            add(JBLabel("DDL 방언:"), BorderLayout.WEST)
+            add(JBLabel(Jpa3dBundle.message("settings.export.dialect")), BorderLayout.WEST)
             add(dialectCombo, BorderLayout.CENTER)
         }
 
@@ -158,19 +162,19 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         val scopePanel = JPanel(VerticalLayout(4)).apply {
             add(rbAll)
             add(rbCurrent)
-            add(buildSubField("Seed 종류:", seedTypeCombo))
-            add(buildSubField("Seed (FQN/패키지):", seedField))
-            add(buildSubField("Depth:", depthSpinner))
+            add(buildSubField(Jpa3dBundle.message("export.field.seedType"), seedTypeCombo))
+            add(buildSubField(Jpa3dBundle.message("export.field.seed"), seedField))
+            add(buildSubField(Jpa3dBundle.message("export.field.depth"), depthSpinner))
         }
 
         return FormBuilder.createFormBuilder()
-            .addLabeledComponent("데이터 export:", dataFormatPanel, 1, false)
+            .addLabeledComponent(Jpa3dBundle.message("export.section.data"), dataFormatPanel, 1, false)
             .addSeparator()
-            .addLabeledComponent("현재 뷰 스냅샷:", snapshotPanel, 1, false)
+            .addLabeledComponent(Jpa3dBundle.message("export.section.snapshot"), snapshotPanel, 1, false)
             .addSeparator()
-            .addLabeledComponent("범위:", scopePanel, 1, false)
+            .addLabeledComponent(Jpa3dBundle.message("export.section.scope"), scopePanel, 1, false)
             .addSeparator()
-            .addLabeledComponent("출력 폴더:", outputField, 1, false)
+            .addLabeledComponent(Jpa3dBundle.message("export.section.output"), outputField, 1, false)
             .addComponentFillVertically(warnLabel, 0)
             .panel.also {
                 it.border = JBUI.Borders.empty(8)
@@ -187,12 +191,12 @@ class ExportDialog(private val project: Project) : DialogWrapper(project, true) 
         if (!cbJson.isSelected && !cbDdl.isSelected && !cbMermaid.isSelected &&
             !cbSnapshotPng.isSelected && !cbSnapshotSvg.isSelected
         ) {
-            return ValidationInfo("최소 한 가지 포맷을 선택해주세요.", cbJson)
+            return ValidationInfo(Jpa3dBundle.message("export.validation.noFormat"), cbJson)
         }
         val out = outputField.text.trim()
-        if (out.isEmpty()) return ValidationInfo("출력 폴더를 지정해주세요.", outputField)
+        if (out.isEmpty()) return ValidationInfo(Jpa3dBundle.message("export.validation.noOutput"), outputField)
         if (rbCurrent.isSelected && seedField.text.trim().isEmpty()) {
-            return ValidationInfo("현재 뷰 범위에는 seed (FQN 또는 패키지) 가 필요합니다.", seedField)
+            return ValidationInfo(Jpa3dBundle.message("export.validation.noSeed"), seedField)
         }
         return null
     }

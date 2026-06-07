@@ -35,7 +35,8 @@ class Jpa3dAddPackageAction : AnAction(), DumbAware {
         e.presentation.isEnabledAndVisible = pkg != null
         if (pkg != null) {
             // 짧은 패키지명을 텍스트에 노출 (full 은 description).
-            e.presentation.text = "JPA 3D: '${pkg.substringAfterLast('.')}' 패키지 추가"
+            e.presentation.text = Jpa3dBundle.message("action.addPackage.text", pkg.substringAfterLast('.'))
+            e.presentation.description = Jpa3dBundle.message("action.addPackage.description")
         }
     }
 

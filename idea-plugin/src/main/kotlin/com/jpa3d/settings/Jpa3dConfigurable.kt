@@ -9,6 +9,7 @@ import com.intellij.ui.dsl.builder.bindSelected
 import com.intellij.ui.dsl.builder.bindText
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.dsl.listCellRenderer.textListCellRenderer
+import com.jpa3d.Jpa3dBundle
 import com.jpa3d.export.DdlDialect
 
 /**
@@ -23,36 +24,46 @@ class Jpa3dConfigurable : BoundConfigurable("JPA 3D") {
     private val state get() = Jpa3dSettings.getInstance().state
 
     override fun createPanel(): DialogPanel = panel {
-        group("뷰어 기본값") {
-            row("기본 뷰:") {
+        group(Jpa3dBundle.message("settings.language.group")) {
+            row(Jpa3dBundle.message("settings.language.label")) {
+                comboBox(
+                    Jpa3dSettings.UiLang.values().toList(),
+                    textListCellRenderer { value: Jpa3dSettings.UiLang? -> uiLangLabel(value) }
+                ).bindItem({ state.uiLang }, { state.uiLang = it ?: Jpa3dSettings.UiLang.AUTO })
+            }
+            row { comment(Jpa3dBundle.message("settings.language.comment")) }
+        }
+
+        group(Jpa3dBundle.message("settings.viewer.group")) {
+            row(Jpa3dBundle.message("settings.viewer.view")) {
                 comboBox(listOf("3d", "2d"))
                     .bindItem({ state.defaultView }, { state.defaultView = it ?: "3d" })
             }
-            row("기본 범위:") {
+            row(Jpa3dBundle.message("settings.viewer.scope")) {
                 comboBox(listOf("all", "seed"))
                     .bindItem({ state.defaultScope }, { state.defaultScope = it ?: "all" })
             }
-            row { comment("seed = 중심 모드(상단 검색으로 중심 엔티티/패키지 선택)") }
-            row("기본 깊이:") {
+            row { comment(Jpa3dBundle.message("settings.viewer.scope.comment")) }
+            row(Jpa3dBundle.message("settings.viewer.depth")) {
                 spinner(0..50, 1).bindIntValue(state::defaultDepth)
             }
-            row { comment("중심 모드에서 seed 로부터의 홉 수") }
+            row { comment(Jpa3dBundle.message("settings.viewer.depth.comment")) }
             row {
-                checkBox("컬럼 표시").bindSelected(state::showColumns)
-                checkBox("리포지토리 표시").bindSelected(state::showRepository)
-                checkBox("상속 표시").bindSelected(state::showExtends)
+                checkBox(Jpa3dBundle.message("settings.viewer.showColumns")).bindSelected(state::showColumns)
+                checkBox(Jpa3dBundle.message("settings.viewer.showRepository")).bindSelected(state::showRepository)
+                checkBox(Jpa3dBundle.message("settings.viewer.showExtends")).bindSelected(state::showExtends)
             }
         }
 
-        group("분석 대상 패키지 필터") {
-            row { comment("한 줄에 패키지 하나. 접두 매칭(com.foo → com.foo 및 하위 패키지). 비우면 전체.") }
-            row("포함(include):") {
+        group(Jpa3dBundle.message("settings.filter.group")) {
+            row { comment(Jpa3dBundle.message("settings.filter.comment")) }
+            row(Jpa3dBundle.message("settings.filter.include")) {
                 textArea()
                     .align(AlignX.FILL)
                     .applyToComponent { rows = 3 }
                     .bindText(state::includePackages)
             }
-            row("제외(exclude):") {
+            row(Jpa3dBundle.message("settings.filter.exclude")) {
                 textArea()
                     .align(AlignX.FILL)
                     .applyToComponent { rows = 3 }
@@ -60,8 +71,8 @@ class Jpa3dConfigurable : BoundConfigurable("JPA 3D") {
             }
         }
 
-        group("Export 기본값") {
-            row("DDL 방언:") {
+        group(Jpa3dBundle.message("settings.export.group")) {
+            row(Jpa3dBundle.message("settings.export.dialect")) {
                 comboBox(
                     DdlDialect.values().toList(),
                     // textListCellRenderer 는 243~262 전 버전에 존재하는 비-deprecated DSL.
@@ -72,13 +83,20 @@ class Jpa3dConfigurable : BoundConfigurable("JPA 3D") {
                 ).bindItem({ state.ddlDialect }, { state.ddlDialect = it ?: DdlDialect.POSTGRES })
             }
             row {
-                checkBox("snake_case 이름 변환 (UserAccount → user_account)")
+                checkBox(Jpa3dBundle.message("settings.export.snakeCase"))
                     .bindSelected(state::ddlSnakeCase)
             }
             row {
-                checkBox("DROP TABLE IF EXISTS 헤더 추가 (재실행 안전)")
+                checkBox(Jpa3dBundle.message("settings.export.dropExisting"))
                     .bindSelected(state::ddlDropExisting)
             }
         }
+    }
+
+    /** 언어 콤보 항목 라벨 — 현재 표시 언어 기준. */
+    private fun uiLangLabel(lang: Jpa3dSettings.UiLang?): String = when (lang) {
+        Jpa3dSettings.UiLang.KO -> Jpa3dBundle.message("settings.language.ko")
+        Jpa3dSettings.UiLang.EN -> Jpa3dBundle.message("settings.language.en")
+        else -> Jpa3dBundle.message("settings.language.auto")
     }
 }

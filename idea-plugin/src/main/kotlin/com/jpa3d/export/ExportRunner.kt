@@ -3,6 +3,7 @@ package com.jpa3d.export
 import com.intellij.openapi.components.service
 import com.intellij.openapi.project.Project
 import com.jpa3d.Jpa3dBrowserHolder
+import com.jpa3d.Jpa3dBundle
 import com.jpa3d.analyzer.Jpa3dAnalysisCache
 import com.jpa3d.model.GraphData
 import java.nio.charset.StandardCharsets
@@ -24,7 +25,7 @@ class ExportRunner(private val project: Project) {
     )
 
     fun run(options: ExportOptions): Result {
-        require(options.anyFormatSelected()) { "최소 한 가지 포맷을 선택해야 합니다." }
+        require(options.anyFormatSelected()) { Jpa3dBundle.message("export.error.noFormat") }
         Files.createDirectories(options.outputDir)
 
         val graph: GraphData = project.service<Jpa3dAnalysisCache>().getGraphData()
@@ -54,8 +55,8 @@ class ExportRunner(private val project: Project) {
         if (options.snapshotPng || options.snapshotSvg) {
             val browser = project.service<Jpa3dBrowserHolder>().browser
             if (browser == null) {
-                if (options.snapshotPng) skipped.add("Snapshot PNG (viewer 가 열려있지 않음)")
-                if (options.snapshotSvg) skipped.add("Snapshot SVG (viewer 가 열려있지 않음)")
+                if (options.snapshotPng) skipped.add(Jpa3dBundle.message("export.skip.png.noViewer"))
+                if (options.snapshotSvg) skipped.add(Jpa3dBundle.message("export.skip.svg.noViewer"))
             } else {
                 val snapshot = ViewerSnapshot(browser)
                 if (options.snapshotPng) {

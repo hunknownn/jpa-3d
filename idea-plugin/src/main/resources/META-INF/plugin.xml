@@ -113,18 +113,23 @@
             Export 액션 — Tools 메뉴에만 정적 등록.
             ToolWindow 툴바/기어 메뉴는 동적으로 Jpa3dToolWindowFactory 가 부착한다.
         -->
+        <!--
+            text/description 은 keymap / Find Action 의 정적 폴백(IDE 로케일).
+            메뉴에 실제로 보이는 텍스트는 각 액션의 update() 가 언어 설정(Jpa3dSettings.UiLang)
+            기준으로 Jpa3dBundle 에서 다시 주입한다.
+        -->
         <action id="JPA3D.Export"
                 class="com.jpa3d.export.ExportAction"
-                text="JPA 3D: Export..."
-                description="JPA 3D 모델을 JSON / DDL / Mermaid / PNG / SVG 로 export">
+                text="JPA 3D: Export…"
+                description="Export the JPA 3D model to JSON / DDL / Mermaid / PNG / SVG">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>
 
         <!-- 프로젝트 트리에서 패키지 우클릭 → 선택 패키지를 뷰어 중심(시드)으로 추가 -->
         <action id="JPA3D.AddPackage"
                 class="com.jpa3d.Jpa3dAddPackageAction"
-                text="JPA 3D: 이 패키지 추가"
-                description="선택한 패키지를 JPA 3D 뷰어의 중심으로 추가">
+                text="JPA 3D: Add This Package"
+                description="Add the selected package as a center of the JPA 3D viewer">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
         </action>
     </actions>

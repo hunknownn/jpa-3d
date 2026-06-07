@@ -7,6 +7,7 @@ import com.intellij.openapi.util.Disposer
 import com.intellij.ui.jcef.JBCefBrowser
 import com.intellij.ui.jcef.JBCefBrowserBase
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.jpa3d.Jpa3dBundle
 import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
@@ -66,14 +67,14 @@ class ViewerSnapshot(private val browser: JBCefBrowser) {
             })()""",
             awaitPromise = true,
             timeoutSec = timeoutSec
-        ) ?: return Result("", ByteArray(0), "viewer 응답 없음 또는 타임아웃")
+        ) ?: return Result("", ByteArray(0), Jpa3dBundle.message("snapshot.error.noResponse"))
 
         return try {
             val node = mapper.readTree(payload)
             val err = node.path("error").asText("").takeIf { it.isNotEmpty() }
             if (err != null) return Result("", ByteArray(0), err)
             val data = node.path("data").asText("")
-            if (data.isEmpty()) return Result("", ByteArray(0), "viewer 응답에 data 가 비어 있음")
+            if (data.isEmpty()) return Result("", ByteArray(0), Jpa3dBundle.message("snapshot.error.emptyData"))
             when (format) {
                 "png" -> {
                     // data URL: "data:image/png;base64,...."
@@ -81,11 +82,11 @@ class ViewerSnapshot(private val browser: JBCefBrowser) {
                     Result("image/png", Base64.getDecoder().decode(b64))
                 }
                 "svg" -> Result("image/svg+xml", data.toByteArray(Charsets.UTF_8))
-                else -> Result("", ByteArray(0), "지원되지 않는 포맷: $format")
+                else -> Result("", ByteArray(0), Jpa3dBundle.message("snapshot.error.unsupportedFormat", format))
             }
         } catch (e: Exception) {
             log.warn("capture parse failed: ${e.message}", e)
-            Result("", ByteArray(0), "결과 파싱 실패: ${e.message}")
+            Result("", ByteArray(0), Jpa3dBundle.message("snapshot.error.parseFailed", e.message ?: ""))
         }
     }
 

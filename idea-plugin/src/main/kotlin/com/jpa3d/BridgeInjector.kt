@@ -32,11 +32,15 @@ class BridgeInjector(private val jsQuery: JBCefJSQuery) : CefLoadHandlerAdapter(
         )
 
         // 설정(설정 → 도구 → JPA 3D)의 뷰어 기본값 — 툴윈도우를 fresh 로 열 때 viewer 의 초기 파라미터.
-        val defaultsJson = Jpa3dSettings.getInstance().viewerDefaultsJson()
+        val settings = Jpa3dSettings.getInstance()
+        val defaultsJson = settings.viewerDefaultsJson()
+        // 표시 언어 — override 모델(AUTO=IDE 로케일)로 결정된 코드를 뷰어 i18n 에 전달.
+        val locale = settings.effectiveLanguageTag()
 
         val script = """
             (function() {
               window.__JPA3D_DEFAULTS__ = $defaultsJson;
+              window.__JPA3D_LOCALE__ = "$locale";
               window.__JPA3D_BRIDGE__ = {
                 request: function(kind, args) {
                   return new Promise(function(resolve, reject) {

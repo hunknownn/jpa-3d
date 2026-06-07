@@ -15,6 +15,7 @@ import com.intellij.openapi.progress.ProgressManager
 import com.intellij.openapi.progress.Task
 import com.intellij.openapi.project.DumbAware
 import com.intellij.openapi.project.Project
+import com.jpa3d.Jpa3dBundle
 
 /**
  * "JPA 3D → Export..." 액션.
@@ -23,12 +24,15 @@ import com.intellij.openapi.project.Project
  * DumbAware — 인덱싱 중에도 다이얼로그 자체는 열린다. 실행 시점에 분석 캐시가 dumb
  * mode 라면 빈 그래프가 export 될 수 있다(사용자에게 알림으로 안내).
  */
-class ExportAction : AnAction("Export...", "JPA 3D 모델을 파일로 export", AllIcons.ToolbarDecorator.Export), DumbAware {
+class ExportAction : AnAction(AllIcons.ToolbarDecorator.Export), DumbAware {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
         e.presentation.isEnabledAndVisible = e.project != null
+        // 텍스트/설명은 매번 언어 설정 기준으로 다시 주입 (plugin.xml 정적 텍스트는 IDE 로케일만 따르므로).
+        e.presentation.text = Jpa3dBundle.message("action.export.text")
+        e.presentation.description = Jpa3dBundle.message("action.export.description")
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -43,7 +47,7 @@ class ExportAction : AnAction("Export...", "JPA 3D 모델을 파일로 export", 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "JPA 3D export", true) {
             override fun run(indicator: ProgressIndicator) {
                 indicator.isIndeterminate = true
-                indicator.text = "JPA 3D 모델 변환 중…"
+                indicator.text = Jpa3dBundle.message("export.progress.text")
                 try {
                     val result = ExportRunner(project).run(options)
                     notify(project, result)
@@ -67,24 +71,27 @@ class ExportAction : AnAction("Export...", "JPA 3D 모델을 파일로 export", 
             result.skippedFormats.isNotEmpty() -> NotificationType.WARNING
             else -> NotificationType.INFORMATION
         }
-        val title = if (result.writtenFiles.isEmpty()) "JPA 3D Export — 생성된 파일 없음" else "JPA 3D Export 완료"
+        val title = if (result.writtenFiles.isEmpty())
+            Jpa3dBundle.message("export.notify.title.none")
+        else
+            Jpa3dBundle.message("export.notify.title.done")
 
         val body = buildString {
             if (result.writtenFiles.isNotEmpty()) {
-                append("파일 ${result.writtenFiles.size}개 생성\n")
+                append(Jpa3dBundle.message("export.notify.filesCreated", result.writtenFiles.size)).append("\n")
                 append(result.writtenFiles.joinToString("\n") { "• ${it.fileName}" })
             }
             if (result.skippedFormats.isNotEmpty()) {
                 if (isNotEmpty()) append("\n\n")
-                append("스킵됨:\n")
+                append(Jpa3dBundle.message("export.notify.skipped")).append("\n")
                 append(result.skippedFormats.joinToString("\n") { "• $it" })
             }
-            if (isEmpty()) append("선택한 항목이 모두 스킵되었습니다.")
+            if (isEmpty()) append(Jpa3dBundle.message("export.notify.allSkipped"))
         }
 
         val notification = group.createNotification(title, body, type)
         if (outputDir != null && RevealFileAction.isSupported()) {
-            notification.addAction(NotificationAction.createSimple("폴더 열기") {
+            notification.addAction(NotificationAction.createSimple(Jpa3dBundle.message("export.notify.openFolder")) {
                 RevealFileAction.openDirectory(outputDir.toFile())
             })
         }
@@ -94,7 +101,7 @@ class ExportAction : AnAction("Export...", "JPA 3D 모델을 파일로 export", 
     private fun notifyError(project: Project, e: Exception) {
         val group = NotificationGroupManager.getInstance().getNotificationGroup(NOTIFICATION_GROUP)
         group.createNotification(
-            "JPA 3D Export 실패",
+            Jpa3dBundle.message("export.notify.title.failed"),
             e.message ?: e.javaClass.simpleName,
             NotificationType.ERROR
         ).notify(project)

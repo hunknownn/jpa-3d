@@ -7,6 +7,7 @@ import { GraphData, GraphNode } from "./types";
 import { UI, RADIUS, controlButton } from "./theme";
 import { IconSync, IconSearch } from "./Icons";
 import { bfsDistances, endpointId, resolveSeedIdsMulti, SeedRef } from "./graphDepth";
+import { t, setLocale } from "./i18n";
 
 type Scope = "all" | "seed";
 type ViewMode = "3d" | "2d";
@@ -155,6 +156,8 @@ export default function ErdApp() {
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  // 언어 변경 시 트리 재렌더 트리거 — setLocale 은 모듈 변수만 바꾸므로 state 로 한 번 흔든다.
+  const [, setLocaleTick] = useState(0);
   const graphRef = useRef<GraphHandle>(null);
   const erd2dRef = useRef<Erd2dHandle>(null);
 
@@ -229,6 +232,26 @@ export default function ErdApp() {
     apply(); // 이미 주입돼 있으면 즉시
     window.addEventListener("jpa3d:bridge-ready", apply);
     return () => window.removeEventListener("jpa3d:bridge-ready", apply);
+  }, []);
+
+  // 표시 언어 — plugin(BridgeInjector)이 window.__JPA3D_LOCALE__ 로 주입.
+  // 주입은 페이지 로드 후(bridge-ready) 일어날 수 있고, 설정 변경 후 재오픈 시엔
+  // apply-defaults 와 함께 갱신된다. 두 시점 모두 다시 적용하고 트리를 재렌더한다.
+  useEffect(() => {
+    const applyLocale = () => {
+      const loc = (window as unknown as { __JPA3D_LOCALE__?: string }).__JPA3D_LOCALE__;
+      if (loc) {
+        setLocale(loc);
+        setLocaleTick((x) => x + 1);
+      }
+    };
+    applyLocale();
+    window.addEventListener("jpa3d:bridge-ready", applyLocale);
+    window.addEventListener("jpa3d:apply-defaults", applyLocale);
+    return () => {
+      window.removeEventListener("jpa3d:bridge-ready", applyLocale);
+      window.removeEventListener("jpa3d:apply-defaults", applyLocale);
+    };
   }, []);
 
   // 툴윈도우 재오픈 시 plugin 이 바뀐 기본값을 push (jpa3d:apply-defaults).
@@ -407,7 +430,7 @@ export default function ErdApp() {
   const items: SuggestItem[] = useMemo(() => {
     if (!query.trim()) return [];
     const pkgItems: SuggestItem[] = packageSuggests.map((pkg) => ({
-      key: `pkg:${pkg}`, primary: pkg, secondary: "패키지 (하위 포함)",
+      key: `pkg:${pkg}`, primary: pkg, secondary: t("search.suggest.package"),
       onPick: () => pickPackage(pkg)
     }));
     const nodeItems: SuggestItem[] = suggests.map((n) => ({
@@ -499,8 +522,8 @@ export default function ErdApp() {
             onKeyDown={onSearchKeyDown}
             placeholder={
               params.scope !== "seed"
-                ? "노드 검색 (하이라이트)"
-                : "엔티티·패키지 검색 후 추가…"
+                ? t("search.placeholder.all")
+                : t("search.placeholder.seed")
             }
             style={{
               width: "100%", padding: "5px 26px 5px 28px", fontSize: 13,
@@ -511,8 +534,8 @@ export default function ErdApp() {
           {query.trim() && (
             <button
               onClick={() => { setQuery(""); setDropdownOpen(false); }}
-              title="검색 초기화"
-              aria-label="검색 초기화"
+              title={t("search.clear")}
+              aria-label={t("search.clear")}
               style={{
                 position: "absolute", right: 4, top: 4,
                 width: 22, height: 22, lineHeight: "20px", textAlign: "center",
@@ -559,7 +582,7 @@ export default function ErdApp() {
               background: UI.panel, border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.container,
               padding: "8px 10px", fontSize: 12, color: UI.textMuted, zIndex: 40
             }}>
-              "{query.trim()}" 와 일치하는 항목이 없습니다.
+              {t("search.noResults", [query.trim()])}
             </div>
           )}
         </div>
@@ -570,8 +593,8 @@ export default function ErdApp() {
           <button
             onClick={() => setRefreshTick((t) => t + 1)}
             disabled={loading}
-            title={loading ? "동기화 중…" : "현재 프로젝트 상태로 ERD 재분석"}
-            aria-label="동기화"
+            title={loading ? t("toolbar.syncing") : t("toolbar.resync")}
+            aria-label={t("toolbar.sync")}
             style={{
               ...controlButton,
               color: loading ? UI.textMuted : UI.textDim,
@@ -581,7 +604,7 @@ export default function ErdApp() {
             <IconSync spin={loading} />
           </button>
           <div style={{ color: UI.textMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-            {`노드 ${data.nodes.length} · 관계 ${data.links.length}`}
+            {t("toolbar.counts", [data.nodes.length, data.links.length])}
           </div>
         </div>
       </div>
@@ -683,10 +706,10 @@ function SegItem({ active, onClick, children, title, first }: {
 function ScopeToggle({ value, onChange }: { value: Scope; onChange: (v: Scope) => void }) {
   return (
     <div style={groupStyle}>
-      <span style={labelStyle}>범위:</span>
+      <span style={labelStyle}>{t("scope.label")}</span>
       <SegGroup>
-        <SegItem first active={value === "all"} onClick={() => onChange("all")} title="모든 엔티티 표시">전체</SegItem>
-        <SegItem active={value === "seed"} onClick={() => onChange("seed")} title="선택한 중심에서 도달 가능한 부분만">중심</SegItem>
+        <SegItem first active={value === "all"} onClick={() => onChange("all")} title={t("scope.all.title")}>{t("scope.all")}</SegItem>
+        <SegItem active={value === "seed"} onClick={() => onChange("seed")} title={t("scope.seed.title")}>{t("scope.seed")}</SegItem>
       </SegGroup>
     </div>
   );
@@ -706,11 +729,11 @@ function SeedChips({ seeds, onRemove, onClear }: {
 }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center", maxWidth: 360 }}>
-      <span style={labelStyle}>중심:</span>
+      <span style={labelStyle}>{t("seeds.label")}</span>
       {seeds.map((s) => (
         <span
           key={`${s.type}:${s.value}`}
-          title={`${s.type === "package" ? "패키지(하위 포함): " : ""}${s.value}`}
+          title={`${s.type === "package" ? t("seeds.package.prefix") : ""}${s.value}`}
           style={{
             display: "inline-flex", alignItems: "center", gap: 4,
             height: 22, padding: "0 4px 0 7px", fontSize: 11, lineHeight: 1,
@@ -724,8 +747,8 @@ function SeedChips({ seeds, onRemove, onClear }: {
           {seedShortLabel(s)}
           <button
             onClick={() => onRemove(s)}
-            title="제거"
-            aria-label={`${s.value} 제거`}
+            title={t("seeds.remove")}
+            aria-label={t("seeds.remove.aria", [s.value])}
             style={{
               width: 16, height: 16, lineHeight: "14px", textAlign: "center",
               background: "transparent", color: UI.textMuted,
@@ -737,13 +760,13 @@ function SeedChips({ seeds, onRemove, onClear }: {
       {seeds.length > 1 && (
         <button
           onClick={onClear}
-          title="모든 중심 제거"
+          title={t("seeds.clearAll.title")}
           style={{
             height: 22, padding: "0 8px", fontSize: 11,
             background: "transparent", color: UI.textMuted,
             border: `1px solid ${UI.border}`, borderRadius: 11, cursor: "pointer"
           }}
-        >모두 지우기</button>
+        >{t("seeds.clearAll")}</button>
       )}
     </div>
   );
@@ -761,7 +784,7 @@ function DepthSlider({ value, max, onChange }: {
   const shown = Math.min(value, Math.max(max, 0));
   return (
     <div style={groupStyle}>
-      <span style={labelStyle}>깊이:</span>
+      <span style={labelStyle}>{t("depth.label")}</span>
       <input
         type="range"
         min={0}
@@ -769,8 +792,8 @@ function DepthSlider({ value, max, onChange }: {
         step={1}
         value={shown}
         disabled={disabled}
-        aria-label="연결 깊이"
-        title={disabled ? "연결된 이웃이 없습니다" : `seed 로부터 ${shown} 홉 (최대 ${max})`}
+        aria-label={t("depth.aria")}
+        title={disabled ? t("depth.title.disabled") : t("depth.title", [shown, max])}
         onChange={(e) => onChange(parseInt(e.target.value, 10))}
         style={{
           width: 92, accentColor: UI.accent,
@@ -802,25 +825,25 @@ function OptionsMenu({ showColumns, showRepository, showExtends, onChange }: {
   const activeCount = [showColumns, showRepository, showExtends].filter(Boolean).length;
 
   const items: { key: keyof DisplayOptions; label: string; hint: string; checked: boolean }[] = [
-    { key: "showColumns", label: "컬럼", hint: "엔티티 컬럼/타입", checked: showColumns },
-    { key: "showRepository", label: "리포지토리", hint: "Spring Data Repository", checked: showRepository },
-    { key: "showExtends", label: "상속", hint: "@MappedSuperclass / EXTENDS", checked: showExtends }
+    { key: "showColumns", label: t("options.columns"), hint: t("options.columns.hint"), checked: showColumns },
+    { key: "showRepository", label: t("options.repository"), hint: t("options.repository.hint"), checked: showRepository },
+    { key: "showExtends", label: t("options.extends"), hint: t("options.extends.hint"), checked: showExtends }
   ];
 
   return (
     <div style={{ ...groupStyle, position: "relative" }}>
-      <span style={labelStyle}>표시:</span>
+      <span style={labelStyle}>{t("options.label")}</span>
       <button
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
         aria-haspopup="menu"
-        title="표시 옵션"
+        title={t("options.title")}
         style={{
           ...controlButton, gap: 6,
           background: open ? UI.panelHover : "transparent"
         }}
       >
-        관계 + {activeCount}
+        {t("options.summary", [activeCount])}
         <span style={{ fontSize: 9, color: UI.textMuted }}>{open ? "▴" : "▾"}</span>
       </button>
       {open && (
@@ -836,7 +859,7 @@ function OptionsMenu({ showColumns, showRepository, showExtends, onChange }: {
             }}
           >
             <div style={{ padding: "4px 10px", fontSize: 11, color: UI.textMuted }}>
-              관계는 항상 표시됩니다
+              {t("options.alwaysRelations")}
             </div>
             {items.map((it) => (
               <button
@@ -883,8 +906,8 @@ function HelpButton({ open, onToggle }: { open: boolean; onToggle: () => void })
   return (
     <button
       onClick={onToggle}
-      title="사용법 도움말"
-      aria-label="사용법 도움말"
+      title={t("view.help")}
+      aria-label={t("view.help")}
       aria-expanded={open}
       style={{
         width: 26, height: 26, fontSize: 13, borderRadius: "50%",
@@ -898,15 +921,15 @@ function HelpButton({ open, onToggle }: { open: boolean; onToggle: () => void })
 
 function HelpPopover({ onClose, top }: { onClose: () => void; top: number }) {
   const rows: [string, string][] = [
-    ["클릭 (3D)", "그 노드로 카메라 이동 · 이웃 강조"],
-    ["더블클릭 (3D)", "엔티티의 소스 파일로 이동"],
-    ["클릭 (2D)", "엔티티의 소스 파일로 이동"],
-    ["우클릭", "그 노드를 중심(seed)으로 다시 탐색"],
-    ["드래그 (2D)", "노드 위치 이동 · ↺ 로 복원"],
-    ["컬럼에 마우스", "해당 엔티티에 연결된 관계 강조"],
-    ["검색", "입력 후 ↑/↓ 이동, Enter 로 선택"],
-    ["휠 / +−", "확대·축소, 'fit' 으로 전체 보기"],
-    ["드래그 (3D)", "좌클릭 회전 · 휠클릭/우클릭 이동"]
+    [t("help.k.clickFocus"), t("help.v.clickFocus")],
+    [t("help.k.dblClick3d"), t("help.v.dblClick3d")],
+    [t("help.k.click2d"), t("help.v.click2d")],
+    [t("help.k.rightClick"), t("help.v.rightClick")],
+    [t("help.k.drag2d"), t("help.v.drag2d")],
+    [t("help.k.colHover"), t("help.v.colHover")],
+    [t("help.k.search"), t("help.v.search")],
+    [t("help.k.wheel"), t("help.v.wheel")],
+    [t("help.k.drag3d"), t("help.v.drag3d")]
   ];
   return (
     <div
@@ -924,10 +947,10 @@ function HelpPopover({ onClose, top }: { onClose: () => void; top: number }) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <strong style={{ fontSize: 13 }}>사용법</strong>
+          <strong style={{ fontSize: 13 }}>{t("help.title")}</strong>
           <button
             onClick={onClose}
-            aria-label="닫기"
+            aria-label={t("help.close")}
             style={{ background: "transparent", border: "none", color: UI.textMuted, cursor: "pointer", fontSize: 16 }}
           >×</button>
         </div>
@@ -976,9 +999,9 @@ function EmptyState() {
   return (
     <CenterMessage>
       <GraphGlyph />
-      <div style={{ fontSize: 18 }}>이 프로젝트에서 JPA Entity를 찾지 못했습니다.</div>
+      <div style={{ fontSize: 18 }}>{t("empty.title")}</div>
       <div style={{ fontSize: 13 }}>
-        분석 대상이 빌드되어 있고 패키지 범위 설정이 올바른지 확인해 주세요.
+        {t("empty.desc")}
       </div>
     </CenterMessage>
   );
@@ -988,10 +1011,9 @@ function SeedPromptState() {
   return (
     <CenterMessage>
       <GraphGlyph />
-      <div style={{ fontSize: 18 }}>중심을 선택하세요.</div>
+      <div style={{ fontSize: 18 }}>{t("seedPrompt.title")}</div>
       <div style={{ fontSize: 13 }}>
-        상단 검색창에서 엔티티나 패키지를 검색해 추가하면, 선택한 중심들 주변 그래프를 그립니다.
-        여러 개를 섞어서 추가할 수 있습니다.
+        {t("seedPrompt.desc")}
       </div>
     </CenterMessage>
   );
@@ -1000,9 +1022,9 @@ function SeedPromptState() {
 function IndexingState() {
   return (
     <CenterMessage>
-      <div style={{ fontSize: 18 }}>IDE 인덱싱 진행 중…</div>
+      <div style={{ fontSize: 18 }}>{t("indexing.title")}</div>
       <div style={{ fontSize: 13 }}>
-        인덱싱이 끝나면 자동으로 분석 결과가 표시됩니다.
+        {t("indexing.desc")}
       </div>
     </CenterMessage>
   );
@@ -1011,12 +1033,12 @@ function IndexingState() {
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
     <CenterMessage>
-      <div style={{ fontSize: 16, color: UI.danger }}>분석 중 오류가 발생했습니다.</div>
+      <div style={{ fontSize: 16, color: UI.danger }}>{t("error.title")}</div>
       <div style={{ fontSize: 12, color: UI.textMuted, maxWidth: 520, wordBreak: "break-word" }}>{message}</div>
       <button
         onClick={onRetry}
         style={{ ...controlButton, marginTop: 4, height: 32, padding: "0 14px", fontSize: 13 }}
-      >↻ 다시 시도</button>
+      >{t("error.retry")}</button>
     </CenterMessage>
   );
 }

@@ -2,11 +2,12 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import ELK, { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk.bundled.js";
 import { GraphData, GraphLink, GraphNode, Relation } from "./types";
 import {
-  UI, RELATION_COLOR, RELATION_LABEL, RELATION_DASH,
-  INHERITANCE_COLOR, INHERITANCE_LABEL, KIND_COLOR, COLUMN_MARK, kindKey,
+  UI, RELATION_COLOR, RELATION_DASH,
+  INHERITANCE_COLOR, KIND_COLOR, COLUMN_MARK, kindKey,
   RADIUS, FONT_MONO, controlButton
 } from "./theme";
 import { IconDirection, IconFit, IconReset } from "./Icons";
+import { t, relationLabel, inheritanceLabel } from "./i18n";
 
 interface Props {
   data: GraphData;
@@ -370,7 +371,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   strokeWidth={3}
                   paintOrder="stroke"
                 >
-                  {RELATION_LABEL[l.relation] ?? l.relation}
+                  {relationLabel(l.relation)}
                 </text>
                 {l.label && isHover && (
                   <text
@@ -455,24 +456,24 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         <button
           style={zoomBtnStyle}
           onClick={() => setRankdir((d) => (d === "LR" ? "TB" : "LR"))}
-          title={`방향 전환 (현재 ${rankdir === "LR" ? "가로" : "세로"})`}
-          aria-label="레이아웃 방향 전환"
+          title={t("erd2d.direction.title", [rankdir === "LR" ? t("erd2d.direction.horizontal") : t("erd2d.direction.vertical")])}
+          aria-label={t("erd2d.direction.aria")}
         >
           <IconDirection horizontal={rankdir === "LR"} />
         </button>
-        <button style={zoomBtnStyle} title="축소" onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
+        <button style={zoomBtnStyle} title={t("ctrl.zoomOut")} onClick={() => setZoom((z) => Math.max(0.2, z / 1.2))}>−</button>
         <span style={{
           minWidth: 44, textAlign: "center", fontSize: 11, color: UI.textMuted,
           fontVariantNumeric: "tabular-nums"
         }}>
           {Math.round(zoom * 100)}%
         </span>
-        <button style={zoomBtnStyle} title="확대" onClick={() => setZoom((z) => Math.min(3, z * 1.2))}>+</button>
+        <button style={zoomBtnStyle} title={t("ctrl.zoomIn")} onClick={() => setZoom((z) => Math.min(3, z * 1.2))}>+</button>
         {nodeOffsets.size > 0 && (
           <button
             style={zoomBtnStyle}
-            title="위치 초기화 — 드래그한 노드를 자동 레이아웃으로 되돌림"
-            aria-label="위치 초기화"
+            title={t("ctrl.resetPos")}
+            aria-label={t("ctrl.resetPos.aria")}
             onClick={() => setNodeOffsets(new Map())}
           >
             <IconReset />
@@ -480,8 +481,8 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
         )}
         <button
           style={zoomBtnStyle}
-          title="전체 보기 (화면에 맞춤)"
-          aria-label="전체 보기"
+          title={t("ctrl.fit")}
+          aria-label={t("ctrl.fit.aria")}
           onClick={() => {
             const margin = 40;
             const scale = Math.min(
@@ -728,7 +729,7 @@ function EntityCard({ node, x, y, showColumns, dimmed, onReseed, onDragStart, on
 
   const inh = node.entity?.inheritance;
   const inhColor = inh ? (INHERITANCE_COLOR[inh.strategy] ?? UI.borderStrong) : null;
-  const inhLabel = inh ? (INHERITANCE_LABEL[inh.strategy] ?? inh.strategy) : null;
+  const inhLabel = inh ? inheritanceLabel(inh.strategy) : null;
   const columnsY = CARD_HEADER_H + (inh ? INH_BAR_H : 0);
 
   return (
