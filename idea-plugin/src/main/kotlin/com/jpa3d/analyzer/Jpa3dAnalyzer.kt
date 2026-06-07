@@ -60,7 +60,17 @@ class Jpa3dAnalyzer(private val project: Project) {
         )
     }
 
-    fun analyze(): GraphData = ReadAction.compute<GraphData, RuntimeException> {
+    /**
+     * 전체 프로젝트 스캔은 수 초가 걸릴 수 있어 **취소 가능한 non-blocking read action** 으로 돈다.
+     * 그냥 [ReadAction.compute] 로 감싸면 read 락을 길게 쥐어, 그 사이 EDT 가 write-intent
+     * (예: 에디터 클릭)을 요청하면 분석이 끝날 때까지 UI 가 얼어붙는다(수 초 freeze).
+     * nonBlocking 은 write 요청이 들어오면 분석을 취소·재시도해 EDT 를 막지 않는다.
+     *
+     * 항상 백그라운드 스레드(pooled / Backgroundable / JCEF 콜백)에서 호출된다 — EDT 에서
+     * [NonBlockingReadAction.executeSynchronously] 를 부르면 예외가 나므로 호출 측이 EDT 가
+     * 아님을 전제한다(캐시 [Jpa3dAnalysisCache] 경유).
+     */
+    fun analyze(): GraphData = ReadAction.nonBlocking<GraphData> {
         val scope = GlobalSearchScope.projectScope(project)
         val facade = JavaPsiFacade.getInstance(project)
         // 어노테이션 PsiClass 를 찾을 때는 라이브러리 jar 도 포함해야 함 (jakarta.persistence.* 가 거기 있음).
@@ -114,7 +124,7 @@ class Jpa3dAnalyzer(private val project: Project) {
         val links = rawLinks.filterNot { it.label?.contains("mappedBy=") == true }
 
         GraphData(seed = "", depth = 0, nodes = nodes, links = links)
-    }
+    }.executeSynchronously()
 
     /**
      * 주어진 어노테이션 FQN 집합(jakarta + javax) 으로 어노테이션된 클래스를 인덱스에서
