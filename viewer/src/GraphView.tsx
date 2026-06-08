@@ -29,8 +29,8 @@ interface Props {
   onNodeSelect: (n: GraphNode, split?: boolean) => void;
   /** 더블 클릭 — 그 노드를 중심(seed)으로 다시 탐색. */
   onNodeReseed: (n: GraphNode) => void;
-  /** 우클릭 — 그 노드를 view 에서 제거(숨김). */
-  onNodeHide: (n: GraphNode) => void;
+  /** 우클릭 — 그 노드를 분석에서 제거(연관 고립 노드는 연쇄 제거, Undo/툴바로 복원). */
+  onNodeRemove: (n: GraphNode) => void;
   highlightedIds?: Set<string>;
   /** 하이라이트의 기준이 된 노드 — highlightedIds 가 활성일 때 항상 포함됨 */
   highlightBaseId?: string;
@@ -418,7 +418,7 @@ function computeLayers(nodes: GraphNode[], links: GraphLink[], rootId: string | 
 }
 
 const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
-  { data, onNodeSelect, onNodeReseed, onNodeHide, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
+  { data, onNodeSelect, onNodeReseed, onNodeRemove, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
   ref
 ) {
   const fgRef = useRef<ForceGraphMethods | undefined>(undefined);
@@ -714,7 +714,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         }) as any}
 
         onNodeClick={(n: any, e: any) => handleNodeClick(n, e)}
-        onNodeRightClick={(n: any) => onNodeHide(n as GraphNode)}
+        onNodeRightClick={(n: any) => onNodeRemove(n as GraphNode)}
         enableNodeDrag={false}
 
         nodeThreeObjectExtend={false}

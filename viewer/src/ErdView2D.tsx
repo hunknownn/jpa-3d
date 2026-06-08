@@ -18,8 +18,8 @@ interface Props {
   showColumns: boolean;
   /** 더블 클릭 — 그 노드를 중심(seed)으로 다시 탐색. */
   onNodeReseed: (n: GraphNode) => void;
-  /** 우클릭 — 그 노드를 view 에서 제거(숨김). */
-  onNodeHide: (n: GraphNode) => void;
+  /** 우클릭 — 그 노드를 분석에서 제거(연관 고립 노드는 연쇄 제거, Undo/툴바로 복원). */
+  onNodeRemove: (n: GraphNode) => void;
   /** 단일 클릭 — 소스 파일 열기. @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
   onNodeNavigate?: (n: GraphNode, split: boolean) => void;
   /** 검색 매칭 노드 id 집합. 비어있지 않으면 비매칭 노드/엣지를 페이드한다. */
@@ -118,7 +118,7 @@ export interface Erd2dHandle {
 }
 
 const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
-  data, width, height, showColumns, onNodeReseed, onNodeHide, onNodeNavigate,
+  data, width, height, showColumns, onNodeReseed, onNodeRemove, onNodeNavigate,
   highlightedIds, highlightBaseId
 }, ref) {
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -444,7 +444,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   if (hovering) setHoverEntityId(n.id);
                   else setHoverEntityId((cur) => (cur === n.id ? null : cur));
                 }}
-                onHide={() => onNodeHide(n)}
+                onHide={() => onNodeRemove(n)}
                 onDragStart={(clientX, clientY) => {
                   // outer div 의 mousemove/up 이 받아 처리. navigate 는 mouseup 시 movement 보고 결정.
                   nodeDragRef.current = {

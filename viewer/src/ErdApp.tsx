@@ -152,8 +152,11 @@ export default function ErdApp() {
   const [toolbarH, setToolbarH] = useState(TOOLBAR_H);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [refreshTick, setRefreshTick] = useState(0);
-  // 우클릭으로 view 에서 제거한 노드 id 집합 — 툴바 메뉴에서 복원. (URL 비저장, 세션 한정)
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
+  // 우클릭으로 분석에서 제거한 노드 id 집합 — 거리/depth 재계산에 반영되고, 그로 인해 고립된
+  // 연관 노드는 연쇄로 사라진다. 툴바 메뉴 또는 Undo(Cmd/Ctrl+Z) 로 복원. (URL 비저장, 세션 한정)
+  const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  // 사용자가 명시적으로 제거한 순서(파생 고립 노드는 포함 안 함) — Undo 로 마지막 제거부터 되돌린다.
+  const [removeHistory, setRemoveHistory] = useState<string[]>([]);
   // 검색 드롭다운: 키보드 탐색 인덱스 + 열림 상태
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -195,6 +198,25 @@ export default function ErdApp() {
       delete w.__JPA3D_SNAPSHOT__;
     };
   }, [params.view]);
+
+  // Undo(Cmd/Ctrl+Z) — 가장 최근에 제거한 노드를 복원한다. 파생 고립 노드는 removedIds 에서
+  // 명시 제거 노드가 빠지면 거리 재계산/고아 정리로 함께 되살아난다.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (!meta || e.shiftKey || e.key.toLowerCase() !== "z") return;
+      // 입력 요소(또는 contentEditable)에 포커스가 있으면 기본 텍스트 Undo 를 방해하지 않는다.
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
+      if (removeHistory.length === 0) return;
+      e.preventDefault();
+      const last = removeHistory[removeHistory.length - 1];
+      restoreNode(last);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [removeHistory]);
 
   // 윈도우 리사이즈
   useEffect(() => {
@@ -318,25 +340,32 @@ export default function ErdApp() {
   ]);
 
   // 선택한 모든 시드로부터의 홉 거리(union BFS) + 최대 깊이(슬라이더 상한). 전체 모드면 필터 비활성.
+  // 제거된 노드는 그래프에서 빼고 거리를 재계산한다 → 그 노드를 유일 경로로 닿던 노드는 도달
+  // 불가가 되어 거리맵에서 빠지고, depth 필터에서 자동으로(=연쇄로) 사라진다.
   const { distances, maxDepth } = useMemo(() => {
     if (params.scope !== "seed" || params.seeds.length === 0) {
       return { distances: null as Map<string, number> | null, maxDepth: 0 };
     }
     const seedIds = resolveSeedIdsMulti(fullData.nodes, params.seeds);
-    const dist = bfsDistances(seedIds, fullData.links);
+    const links = removedIds.size === 0
+      ? fullData.links
+      : fullData.links.filter(
+          (l) => !removedIds.has(endpointId(l.source)) && !removedIds.has(endpointId(l.target))
+        );
+    const dist = bfsDistances(seedIds, links);
+    // 제거된 시드 자신은 거리 0 으로 들어오므로 제외한다.
+    for (const id of removedIds) dist.delete(id);
     let mx = 0;
     for (const v of dist.values()) mx = Math.max(mx, v);
     return { distances: dist, maxDepth: mx };
-  }, [fullData, params.scope, params.seeds]);
+  }, [fullData, params.scope, params.seeds, removedIds]);
 
   // 화면에 보낼 데이터 — envelope 를 현재 depth(홉) 까지 로컬로 자른 부분 그래프.
   // 전체 모드/필터 비활성이면 envelope 그대로.
   const data = useMemo<GraphData>(() => {
-    // 1) scope/depth 로 자른 기본 그래프
-    let base: GraphData;
-    if (params.scope !== "seed" || params.seeds.length === 0 || !distances) {
-      base = fullData;
-    } else {
+    // seed 모드: distances 가 이미 제거 노드를 배제한 채 재계산됐으므로, depth 컷만 적용하면
+    // 제거 노드와 그로 인해 도달 불가가 된 연관 노드가 모두 자동으로 빠진다.
+    if (params.scope === "seed" && params.seeds.length > 0 && distances) {
       const limit = Math.min(params.depth, maxDepth);
       const keepNodes = fullData.nodes.filter((n) => {
         const d = distances.get(n.id);
@@ -346,40 +375,73 @@ export default function ErdApp() {
       const keepLinks = fullData.links.filter(
         (l) => keep.has(endpointId(l.source)) && keep.has(endpointId(l.target))
       );
-      base = { ...fullData, depth: limit, nodes: keepNodes, links: keepLinks };
+      return { ...fullData, depth: limit, nodes: keepNodes, links: keepLinks };
     }
-    // 2) 우클릭으로 숨긴 노드(+그에 닿는 엣지) 제거
-    if (hiddenIds.size === 0) return base;
-    const nodes = base.nodes.filter((n) => !hiddenIds.has(n.id));
-    const visible = new Set(nodes.map((n) => n.id));
-    const links = base.links.filter(
-      (l) => visible.has(endpointId(l.source)) && visible.has(endpointId(l.target))
-    );
-    return { ...base, nodes, links };
-  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seeds, hiddenIds]);
 
-  // 숨긴 노드 목록(현재 그래프에 실재하는 것만) — 툴바 복원 메뉴용.
-  const hiddenNodes = useMemo(
-    () => fullData.nodes.filter((n) => hiddenIds.has(n.id)),
-    [fullData, hiddenIds]
+    // 전체 모드: 거리 기준이 없으므로 직접 정리한다. 제거 노드를 빼고, "원래는 연결돼 있었으나
+    // 제거 때문에 새로 고립된" 노드만 연쇄로 함께 제거한다(fixpoint). 원래부터 독립이던 노드는
+    // 제거와 무관하므로 보존한다.
+    if (removedIds.size === 0) return fullData;
+
+    const origDegree = new Map<string, number>();
+    for (const l of fullData.links) {
+      const s = endpointId(l.source), t = endpointId(l.target);
+      origDegree.set(s, (origDegree.get(s) ?? 0) + 1);
+      origDegree.set(t, (origDegree.get(t) ?? 0) + 1);
+    }
+
+    const alive = new Set(fullData.nodes.map((n) => n.id).filter((id) => !removedIds.has(id)));
+    for (;;) {
+      const degree = new Map<string, number>();
+      for (const l of fullData.links) {
+        const s = endpointId(l.source), t = endpointId(l.target);
+        if (!alive.has(s) || !alive.has(t)) continue;
+        degree.set(s, (degree.get(s) ?? 0) + 1);
+        degree.set(t, (degree.get(t) ?? 0) + 1);
+      }
+      const orphaned: string[] = [];
+      for (const id of alive) {
+        const wasConnected = (origDegree.get(id) ?? 0) > 0;
+        const nowConnected = (degree.get(id) ?? 0) > 0;
+        if (wasConnected && !nowConnected) orphaned.push(id);
+      }
+      if (orphaned.length === 0) break;
+      for (const id of orphaned) alive.delete(id);
+    }
+
+    const nodes = fullData.nodes.filter((n) => alive.has(n.id));
+    const links = fullData.links.filter(
+      (l) => alive.has(endpointId(l.source)) && alive.has(endpointId(l.target))
+    );
+    return { ...fullData, nodes, links };
+  }, [fullData, distances, maxDepth, params.depth, params.scope, params.seeds, removedIds]);
+
+  // 제거한 노드 목록(원본에 실재하는 것만) — 툴바 복원 메뉴용.
+  const removedNodes = useMemo(
+    () => fullData.nodes.filter((n) => removedIds.has(n.id)),
+    [fullData, removedIds]
   );
 
-  function hideNode(n: GraphNode) {
-    setHiddenIds((prev) => {
+  function removeNode(n: GraphNode) {
+    setRemovedIds((prev) => {
+      if (prev.has(n.id)) return prev;
       const next = new Set(prev);
       next.add(n.id);
       return next;
     });
+    setRemoveHistory((prev) => (prev.includes(n.id) ? prev : [...prev, n.id]));
   }
   function restoreNode(id: string) {
-    setHiddenIds((prev) => {
+    setRemovedIds((prev) => {
       const next = new Set(prev);
       next.delete(id);
       return next;
     });
+    setRemoveHistory((prev) => prev.filter((x) => x !== id));
   }
   function restoreAllNodes() {
-    setHiddenIds(new Set());
+    setRemovedIds(new Set());
+    setRemoveHistory([]);
   }
 
   // 검색
@@ -539,11 +601,11 @@ export default function ErdApp() {
           showExtends={params.showExtends}
           onChange={(patch) => setParams({ ...params, ...patch })}
         />
-        {hiddenNodes.length > 0 && (
+        {removedNodes.length > 0 && (
           <>
             <Divider />
             <HiddenNodesMenu
-              nodes={hiddenNodes}
+              nodes={removedNodes}
               onRestore={restoreNode}
               onRestoreAll={restoreAllNodes}
             />
@@ -681,7 +743,7 @@ export default function ErdApp() {
               highlightedIds={highlightedIds}
               highlightBaseId={params.seeds[0]?.value}
               onNodeReseed={(n) => pickSeed(n)}
-              onNodeHide={(n) => hideNode(n)}
+              onNodeRemove={(n) => removeNode(n)}
               onNodeNavigate={(n, split) => navigateToSource(n.id, split)}
             />
             <Legend view="2d" />
@@ -698,7 +760,7 @@ export default function ErdApp() {
               highlightBaseId={params.seeds[0]?.value}
               onNodeSelect={(n, split) => navigateToSource(n.id, split)}
               onNodeReseed={(n) => pickSeed(n)}
-              onNodeHide={(n) => hideNode(n)}
+              onNodeRemove={(n) => removeNode(n)}
             />
             <Legend view="3d" />
           </>
@@ -942,8 +1004,8 @@ function OptionsMenu({ showColumns, showRepository, showExtends, onChange }: {
 }
 
 /**
- * "숨김" 드롭다운 — 노드를 우클릭하면 view 에서 제거되고, 이 메뉴에 쌓인다.
- * 항목을 클릭하면 그 노드만 복원, "모두 복원" 으로 일괄 복원. 숨긴 노드가 없으면 렌더되지 않는다.
+ * "제거" 드롭다운 — 노드를 우클릭하면 분석에서 제거되고, 명시적으로 제거한 노드가 이 메뉴에 쌓인다.
+ * 항목을 클릭하면 그 노드만 복원, "모두 복원" 으로 일괄 복원. 제거한 노드가 없으면 렌더되지 않는다.
  */
 function HiddenNodesMenu({ nodes, onRestore, onRestoreAll }: {
   nodes: GraphNode[];
