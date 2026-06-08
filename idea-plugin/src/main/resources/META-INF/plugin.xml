@@ -95,6 +95,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.5.5</b>
+        <ul>
+          <li><b>Right-click now removes a node from the analysis</b> &mdash; instead of just hiding it, distances and the depth filter are recomputed, so neighbors that were only reachable through the removed node disappear with it (cascade). In <i>all</i> scope, only nodes that became orphaned by the removal are pruned &mdash; originally independent entities are kept. Undo with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd>, or restore from the toolbar.</li>
+        </ul>
         <b>0.5.4</b>
         <ul>
           <li><b>Fixed a PluginException when opening Settings</b> &mdash; the JPA 3D sub-tabs (Viewer / Analysis / Export / Editor) are now provided as composite children of the parent page instead of separate extension points. The platform no longer logs <code>No display name specified&hellip;</code> nor eagerly loads each tab class, while the tab names still follow the plugin language setting.</li>
