@@ -152,7 +152,9 @@ class Jpa3dRequestHandler(private val project: Project) {
     }
 
     /**
-     * include/exclude 패키지 패턴으로 노드를 거른다(접두 매칭, [GraphScope] 와 동일 규칙).
+     * include/exclude 패턴으로 노드를 거른다. 각 패턴은 패키지(접두 매칭) 또는
+     * 클래스 FQN(정확 매칭) 으로 해석된다 — 예) `com.foo` 는 패키지+하위 전부,
+     * `com.foo.Order` 는 그 클래스 하나만.
      *  - include 가 비면 전체 허용, 아니면 매칭되는 노드만.
      *  - exclude 매칭은 include 보다 우선해 항상 제거.
      * 두 패턴이 모두 비면 입력을 그대로 돌려준다.
@@ -165,10 +167,14 @@ class Jpa3dRequestHandler(private val project: Project) {
         val inc = parsePackagePatterns(include)
         val exc = parsePackagePatterns(exclude)
         if (inc.isEmpty() && exc.isEmpty()) return nodes
-        fun matches(pkg: String, p: String) = pkg == p || pkg.startsWith("$p.")
+        // 패턴은 패키지(접두) 또는 클래스 FQN(정확) 둘 다 매칭한다.
+        //  - 패키지: pkg == p 또는 하위 패키지(pkg.startsWith("p."))
+        //  - 클래스: id == p (FQN 정확 매칭). 예) com.foo.Order 한 클래스만 지정 가능.
+        fun matches(n: GraphNode, p: String) =
+            n.pkg == p || n.pkg.startsWith("$p.") || n.id == p
         return nodes.filter { n ->
-            val included = inc.isEmpty() || inc.any { matches(n.pkg, it) }
-            val excluded = exc.any { matches(n.pkg, it) }
+            val included = inc.isEmpty() || inc.any { matches(n, it) }
+            val excluded = exc.any { matches(n, it) }
             included && !excluded
         }
     }
@@ -184,8 +190,12 @@ class Jpa3dRequestHandler(private val project: Project) {
         val includeRepositories = (args?.get("includeRepositories") as? Boolean) ?: true
 
         val graph: GraphData = project.service<Jpa3dAnalysisCache>().getGraphData()
+        // 분석 대상 필터를 그래프 뷰와 동일하게 검색에도 적용 — 범위 밖 엔티티가
+        // 검색으로 새어 나와 seed 추가/하이라이트 시 빈 결과가 되는 불일치를 막는다.
+        val settings = Jpa3dSettings.getInstance().state
+        val candidates = applyPackageFilter(graph.nodes, settings.includePackages, settings.excludePackages)
         val needle = q.lowercase()
-        val hits: List<GraphNode> = graph.nodes.filter { n ->
+        val hits: List<GraphNode> = candidates.filter { n ->
             (includeRepositories || n.entity != null) &&
                 (n.name.lowercase().contains(needle) || n.id.lowercase().contains(needle))
         }
