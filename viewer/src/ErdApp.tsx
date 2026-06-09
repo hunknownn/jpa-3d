@@ -4,7 +4,7 @@ import ErdView2D, { Erd2dHandle } from "./ErdView2D";
 import Legend from "./Legend";
 import { fetchErd, navigateToSource, searchErd } from "./api";
 import { GraphData, GraphNode } from "./types";
-import { UI, RADIUS, controlButton, KIND_COLOR, kindKey } from "./theme";
+import { UI, RADIUS, controlButton, KIND_COLOR, kindKey, applyTheme } from "./theme";
 import { IconSync, IconSearch } from "./Icons";
 import { bfsDistances, endpointId, resolveSeedIdsMulti, SeedRef } from "./graphDepth";
 import { t, setLocale } from "./i18n";
@@ -163,6 +163,8 @@ export default function ErdApp() {
   const [showHelp, setShowHelp] = useState(false);
   // 언어 변경 시 트리 재렌더 트리거 — setLocale 은 모듈 변수만 바꾸므로 state 로 한 번 흔든다.
   const [, setLocaleTick] = useState(0);
+  // 테마 변경 시 트리 전체를 재렌더해 새 UI 색을 반영하기 위한 틱.
+  const [, setThemeTick] = useState(0);
   const graphRef = useRef<GraphHandle>(null);
   const erd2dRef = useRef<Erd2dHandle>(null);
 
@@ -275,6 +277,24 @@ export default function ErdApp() {
     return () => {
       window.removeEventListener("jpa3d:bridge-ready", applyLocale);
       window.removeEventListener("jpa3d:apply-defaults", applyLocale);
+    };
+  }, []);
+
+  // IDE 테마(다크/라이트) — plugin(BridgeInjector)이 window.__JPA3D_THEME__ 로 주입.
+  // 최초 주입(bridge-ready)과 IDE 테마 전환(theme-change, LafManagerListener) 두 시점 모두
+  // UI 토큰을 교체하고 트리를 재렌더한다. (3D 노드 카드는 고정 다크라 영향 없음.)
+  useEffect(() => {
+    const applyHostTheme = () => {
+      const g = window as unknown as { __JPA3D_THEME__?: string; __JPA3D_THEME_BG__?: string };
+      applyTheme(g.__JPA3D_THEME__, g.__JPA3D_THEME_BG__);
+      setThemeTick((x) => x + 1);
+    };
+    applyHostTheme();
+    window.addEventListener("jpa3d:bridge-ready", applyHostTheme);
+    window.addEventListener("jpa3d:theme-change", applyHostTheme);
+    return () => {
+      window.removeEventListener("jpa3d:bridge-ready", applyHostTheme);
+      window.removeEventListener("jpa3d:theme-change", applyHostTheme);
     };
   }, []);
 

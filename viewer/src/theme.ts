@@ -3,8 +3,28 @@
 // 색/라벨이 한 곳에 모여야 "화면에 보이는 색 == 범례의 색" 이 보장된다.
 import { Relation } from "./types";
 
-/** UI 크롬(패널/보더/텍스트) 토큰 — slate 팔레트. */
-export const UI = {
+export type ThemeMode = "dark" | "light";
+
+/** UI 크롬 토큰의 형태. 값은 테마(다크/라이트)에 따라 런타임에 채워진다. */
+export interface UiTokens {
+  canvas: string;
+  canvas3d: string;
+  panel: string;
+  panelAlt: string;
+  panelHover: string;
+  border: string;
+  borderStrong: string;
+  text: string;
+  textDim: string;
+  textMuted: string;
+  textBright: string;
+  /** 선택/포커스/브랜드 강조 — 카테고리 파랑(entity)과 구분되는 바이올렛. */
+  accent: string;
+  danger: string;
+}
+
+/** 다크(기본) — slate 팔레트. 스탠드얼론(플러그인 밖) 기본값이기도 하다. */
+const UI_DARK: UiTokens = {
   canvas: "#0f172a",
   canvas3d: "#0b1020",
   panel: "#1e293b",
@@ -16,9 +36,41 @@ export const UI = {
   textDim: "#cbd5e1",
   textMuted: "#94a3b8",
   textBright: "#f1f5f9",
-  /** 선택/포커스/브랜드 강조 — 카테고리 파랑(entity)과 구분되는 바이올렛. */
   accent: "#8b5cf6",
   danger: "#f87171"
+};
+
+/** 라이트 — 다크와 동일한 의미 축을 밝게 반전(slate 계열 유지). IDE 라이트 테마에서 사용. */
+const UI_LIGHT: UiTokens = {
+  canvas: "#fbfcfd",       // 2D 배경 — 회색기를 빼고 거의 흰색에 가깝게
+  canvas3d: "#eef1f5",     // 3D 씬 배경 — 다크 카드와 대비되도록 약간 밝은 톤
+  panel: "#ffffff",
+  panelAlt: "#f6f8fa",
+  panelHover: "#eef1f4",
+  border: "#e2e6ea",       // 경계도 한 단계 옅게 — 회색 띠가 도드라지지 않도록
+  borderStrong: "#aab3bf",
+  text: "#1e293b",
+  textDim: "#334155",
+  textMuted: "#64748b",
+  textBright: "#0f172a",
+  accent: "#7c3aed",       // 밝은 배경 대비를 위해 다크보다 한 단계 진한 바이올렛
+  danger: "#dc2626"
+};
+
+/**
+ * 활성 UI 크롬 토큰. **동일 객체 참조**를 유지한 채 [applyTheme] 가 내용만 교체한다.
+ * 컴포넌트는 렌더 시점에 `UI.x` 를 읽으므로, 재렌더만 트리거되면 새 색이 반영된다.
+ */
+export const UI: UiTokens = { ...UI_DARK };
+
+/**
+ * 3D 노드 카드는 IDE 테마와 무관한 **고정 다크 디자인**(3D 공간에 떠 있는 '물체'라
+ * 라이트 배경 위에서도 그대로 둔다). 카드 내부 색은 테마러블한 [UI] 와 분리한다.
+ */
+export const CARD3D = {
+  text: "#e2e8f0",
+  textMuted: "#94a3b8",
+  inhFallback: "#475569"
 } as const;
 
 // === 색 의미 축 (서로 다른 hue 계열로 분리) ===
@@ -83,14 +135,40 @@ export const FONT_SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-se
 /** 코드 식별자(컬럼명/타입)용 모노스페이스 — 세로 정렬 + 코드 친화. */
 export const FONT_MONO = 'ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace';
 
-/** 공통 고스트 버튼 스타일 — zoom/fit/동기화/재시도 등이 공유. */
-export const controlButton: React.CSSProperties = {
-  height: 28, minWidth: 28, padding: "0 8px", fontSize: 12,
-  display: "inline-flex", alignItems: "center", justifyContent: "center",
-  background: "transparent", color: UI.textDim,
-  border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.control,
-  cursor: "pointer", lineHeight: 1
-};
+function computeControlButton(): React.CSSProperties {
+  return {
+    height: 28, minWidth: 28, padding: "0 8px", fontSize: 12,
+    display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: "transparent", color: UI.textDim,
+    border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.control,
+    cursor: "pointer", lineHeight: 1
+  };
+}
+
+/**
+ * 공통 고스트 버튼 스타일 — zoom/fit/동기화/재시도 등이 공유.
+ * [UI] 와 마찬가지로 **동일 참조**를 유지(테마 전환 시 내용만 갱신)하므로,
+ * 이를 복사해 둔 파생 스타일(zoomBtnStyle 등)도 자동으로 새 색을 따라간다.
+ */
+export const controlButton: React.CSSProperties = computeControlButton();
+
+/**
+ * 호스트(plugin)가 주입한 테마를 적용. [UI]/[controlButton] 객체를 in-place 로 갱신한다.
+ *
+ * @param hostBg IDE 패널 배경색(hex). 라이트 테마에서 캔버스 배경을 이 색으로 맞춰
+ *   주변 IDE 패널(예: Gradle 툴윈도우)과 이음매 없이 붙인다. 다크는 자체 팔레트 유지.
+ */
+export function applyTheme(mode: ThemeMode | string | undefined, hostBg?: string): void {
+  const tokens: UiTokens = { ...(mode === "light" ? UI_LIGHT : UI_DARK) };
+  if (mode === "light" && hostBg) {
+    // 카드(panel) 는 흰색으로 띄워 두고, 배경 계열만 IDE 패널색과 동일하게.
+    tokens.canvas = hostBg;
+    tokens.canvas3d = hostBg;
+    tokens.panelAlt = hostBg;
+  }
+  Object.assign(UI, tokens);
+  Object.assign(controlButton, computeControlButton());
+}
 
 /** hex(#rrggbb) → rgba 문자열. 3D 카드의 반투명 헤더 등에 사용. */
 export function hexToRgba(hex: string, alpha: number): string {

@@ -3,7 +3,7 @@ import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { GraphData, GraphLink, GraphNode } from "./types";
 import {
-  UI, RELATION_COLOR,
+  UI, CARD3D, RELATION_COLOR,
   INHERITANCE_COLOR, KIND_COLOR, COLUMN_MARK, hexToRgba, kindKey,
   FONT_MONO, controlButton, RADIUS
 } from "./theme";
@@ -228,7 +228,7 @@ function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
   }
 
   if (inh) {
-    const inhColor = INHERITANCE_COLOR[inh.strategy] ?? UI.borderStrong;
+    const inhColor = INHERITANCE_COLOR[inh.strategy] ?? CARD3D.inhFallback;
     const inhLabel = inheritanceLabel(inh.strategy);
     ctx.fillStyle = inhColor;
     ctx.globalAlpha = 0.85;
@@ -266,14 +266,14 @@ function makeEntityCardSprite(n: GraphNode): THREE.Sprite {
     const nameX = 12 + COL_INDENT;
     const nameAvail = CARD_W - 12 - nameX - rightW - 6;
     ctx.font = colNameFont;
-    ctx.fillStyle = UI.text;
+    ctx.fillStyle = CARD3D.text;
     ctx.textAlign = "left";
     ctx.fillText(fitText(c.columnName ?? c.fieldName, nameAvail, colNameFont), nameX, y);
 
     ctx.font = `11px ${CARD_MONO}`;
     ctx.textAlign = "right";
     let rx = CARD_W - 12;
-    ctx.fillStyle = UI.textMuted;
+    ctx.fillStyle = CARD3D.textMuted;
     ctx.fillText(typeStr, rx, y);
     rx -= ctx.measureText(typeStr).width;
     if (c.indexed) {
@@ -651,13 +651,16 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
   }, [activeSet, activeBase, showColumns]);
 
   return (
-    <div style={{ position: "relative", width, height }}>
+    // 배경을 DOM 레이어(canvas3d)로 두고 WebGL 캔버스는 투명(alpha 0)으로 클리어한다.
+    // 노드/카드 스프라이트는 불투명 유지 — 보이는 결과는 기존과 동일하다.
+    // (이렇게 분리해 두면, 추후 이 DOM 배경 한 겹만 transparent 로 바꿔 IDE 배경이 비치게 할 수 있다.)
+    <div style={{ position: "relative", width, height, background: UI.canvas3d }}>
       <ForceGraph3D
         ref={fgRef}
         width={width}
         height={height}
         graphData={graphData}
-        backgroundColor={UI.canvas3d}
+        backgroundColor="rgba(0,0,0,0)"
         cooldownTicks={200}
         d3VelocityDecay={0.4}
         onEngineStop={handleEngineStop}

@@ -1,5 +1,6 @@
 package com.jpa3d
 
+import com.intellij.ide.ui.LafManagerListener
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
@@ -66,6 +67,22 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
 
             // 페이지 로드 완료 후 브리지 주입
             browser.jbCefClient.addLoadHandler(BridgeInjector(jsQuery), browser.cefBrowser)
+
+            // IDE 테마(다크/라이트) 전환을 살아있는 viewer 에 push.
+            // 초기 테마는 BridgeInjector 가 __JPA3D_THEME__ 로 주입하고, 이후 전환은 여기서
+            // 전역값을 갱신 + jpa3d:theme-change 이벤트로 알린다(패널 dispose 시 구독 해제).
+            ApplicationManager.getApplication().messageBus.connect(this)
+                .subscribe(LafManagerListener.TOPIC, LafManagerListener {
+                    val mode = jpa3dThemeMode()
+                    val bg = jpa3dViewerBgHex()
+                    val cef = browser.cefBrowser
+                    cef.executeJavaScript(
+                        "window.__JPA3D_THEME__ = \"$mode\";" +
+                            "window.__JPA3D_THEME_BG__ = \"$bg\";" +
+                            "window.dispatchEvent(new CustomEvent(\"jpa3d:theme-change\"));",
+                        cef.url, 0
+                    )
+                })
 
             val html = loadViewerHtml()
             if (html != null) {

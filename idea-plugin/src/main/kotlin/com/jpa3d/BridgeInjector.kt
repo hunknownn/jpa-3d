@@ -1,10 +1,27 @@
 package com.jpa3d
 
+import com.intellij.ui.JBColor
 import com.intellij.ui.jcef.JBCefJSQuery
+import com.intellij.util.ui.UIUtil
 import com.jpa3d.settings.Jpa3dSettings
 import org.cef.browser.CefBrowser
 import org.cef.browser.CefFrame
 import org.cef.handler.CefLoadHandlerAdapter
+import java.awt.Color
+
+/** 현재 IDE 테마 모드 — 뷰어 UI 크롬이 IDE 다크/라이트를 따라가도록 전달하는 값. */
+internal fun jpa3dThemeMode(): String = if (JBColor.isBright()) "light" else "dark"
+
+/**
+ * IDE 툴윈도우 콘텐츠(트리/리스트) 배경색 hex — 라이트 테마에서 뷰어 캔버스 배경을 맞추는 데 쓴다.
+ *
+ * Gradle/Project 같은 툴윈도우의 내용 영역은 트리라, 그 배경(라이트에선 거의 흰색)이
+ * 사용자가 비교 대상으로 삼는 색이다. 패널 배경(getPanelBackground)은 더 칙칙한 쿨 그레이라
+ * 비교 대상과 어긋나므로 트리 배경을 쓴다.
+ */
+internal fun jpa3dViewerBgHex(): String = colorHex(UIUtil.getTreeBackground())
+
+private fun colorHex(c: Color): String = String.format("#%02x%02x%02x", c.red, c.green, c.blue)
 
 /**
  * 페이지 로드가 완료될 때마다 `window.__JPA3D_BRIDGE__` 를 주입한다.
@@ -36,11 +53,17 @@ class BridgeInjector(private val jsQuery: JBCefJSQuery) : CefLoadHandlerAdapter(
         val defaultsJson = settings.viewerDefaultsJson()
         // 표시 언어 — override 모델(AUTO=IDE 로케일)로 결정된 코드를 뷰어 i18n 에 전달.
         val locale = settings.effectiveLanguageTag()
+        // IDE 테마(다크/라이트)와 IDE 패널 배경색 — 뷰어 UI 크롬이 IDE 를 따라가도록 전달.
+        // 페이지 로드 후의 IDE 테마 전환은 Jpa3dViewerPanel 의 LafManagerListener 가 push 한다.
+        val theme = jpa3dThemeMode()
+        val themeBg = jpa3dViewerBgHex()
 
         val script = """
             (function() {
               window.__JPA3D_DEFAULTS__ = $defaultsJson;
               window.__JPA3D_LOCALE__ = "$locale";
+              window.__JPA3D_THEME__ = "$theme";
+              window.__JPA3D_THEME_BG__ = "$themeBg";
               window.__JPA3D_BRIDGE__ = {
                 request: function(kind, args) {
                   return new Promise(function(resolve, reject) {
