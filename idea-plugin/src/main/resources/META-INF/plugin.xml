@@ -191,6 +191,7 @@
             parentId="tools"
             id="com.jpa3d.settings"
             displayName="JPA 3D"
+            dynamic="true"
             instance="com.jpa3d.settings.Jpa3dConfigurable"/>
     </extensions>
 
