@@ -153,10 +153,8 @@ export default function ErdApp() {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [refreshTick, setRefreshTick] = useState(0);
   // 우클릭으로 분석에서 제거한 노드 id 집합 — 거리/depth 재계산에 반영되고, 그로 인해 고립된
-  // 연관 노드는 연쇄로 사라진다. 툴바 메뉴 또는 Undo(Cmd/Ctrl+Z) 로 복원. (URL 비저장, 세션 한정)
+  // 연관 노드는 연쇄로 사라진다. 툴바 메뉴로 복원. (URL 비저장, 세션 한정)
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
-  // 사용자가 명시적으로 제거한 순서(파생 고립 노드는 포함 안 함) — Undo 로 마지막 제거부터 되돌린다.
-  const [removeHistory, setRemoveHistory] = useState<string[]>([]);
   // 검색 드롭다운: 키보드 탐색 인덱스 + 열림 상태
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -200,25 +198,6 @@ export default function ErdApp() {
       delete w.__JPA3D_SNAPSHOT__;
     };
   }, [params.view]);
-
-  // Undo(Cmd/Ctrl+Z) — 가장 최근에 제거한 노드를 복원한다. 파생 고립 노드는 removedIds 에서
-  // 명시 제거 노드가 빠지면 거리 재계산/고아 정리로 함께 되살아난다.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const meta = e.metaKey || e.ctrlKey;
-      if (!meta || e.shiftKey || e.key.toLowerCase() !== "z") return;
-      // 입력 요소(또는 contentEditable)에 포커스가 있으면 기본 텍스트 Undo 를 방해하지 않는다.
-      const el = e.target as HTMLElement | null;
-      const tag = el?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || el?.isContentEditable) return;
-      if (removeHistory.length === 0) return;
-      e.preventDefault();
-      const last = removeHistory[removeHistory.length - 1];
-      restoreNode(last);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [removeHistory]);
 
   // 윈도우 리사이즈
   useEffect(() => {
@@ -285,8 +264,12 @@ export default function ErdApp() {
   // UI 토큰을 교체하고 트리를 재렌더한다. (3D 노드 카드는 고정 다크라 영향 없음.)
   useEffect(() => {
     const applyHostTheme = () => {
-      const g = window as unknown as { __JPA3D_THEME__?: string; __JPA3D_THEME_BG__?: string };
-      applyTheme(g.__JPA3D_THEME__, g.__JPA3D_THEME_BG__);
+      const g = window as unknown as {
+        __JPA3D_THEME__?: string;
+        __JPA3D_THEME_BG__?: string;
+        __JPA3D_TRANSPARENT__?: string;
+      };
+      applyTheme(g.__JPA3D_THEME__, g.__JPA3D_THEME_BG__, g.__JPA3D_TRANSPARENT__ === "true");
       setThemeTick((x) => x + 1);
     };
     applyHostTheme();
@@ -449,7 +432,6 @@ export default function ErdApp() {
       next.add(n.id);
       return next;
     });
-    setRemoveHistory((prev) => (prev.includes(n.id) ? prev : [...prev, n.id]));
   }
   function restoreNode(id: string) {
     setRemovedIds((prev) => {
@@ -457,11 +439,9 @@ export default function ErdApp() {
       next.delete(id);
       return next;
     });
-    setRemoveHistory((prev) => prev.filter((x) => x !== id));
   }
   function restoreAllNodes() {
     setRemovedIds(new Set());
-    setRemoveHistory([]);
   }
 
   // 검색
@@ -658,7 +638,7 @@ export default function ErdApp() {
             }
             style={{
               width: "100%", padding: "5px 26px 5px 28px", fontSize: 13,
-              background: UI.canvas, color: UI.text,
+              background: UI.field, color: UI.text,
               border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.control
             }}
           />
@@ -870,7 +850,7 @@ function SeedChips({ seeds, onRemove, onClear }: {
           style={{
             display: "inline-flex", alignItems: "center", gap: 4,
             height: 22, padding: "0 4px 0 7px", fontSize: 11, lineHeight: 1,
-            background: UI.canvas, color: UI.text,
+            background: UI.field, color: UI.text,
             border: `1px solid ${UI.borderStrong}`, borderRadius: 11
           }}
         >

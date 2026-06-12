@@ -9,6 +9,8 @@ export type ThemeMode = "dark" | "light";
 export interface UiTokens {
   canvas: string;
   canvas3d: string;
+  /** 입력창·칩 등 인셋 표면 — 배경(canvas)이 투명일 때도 **불투명**을 유지해 글자 가독성을 지킨다. */
+  field: string;
   panel: string;
   panelAlt: string;
   panelHover: string;
@@ -27,6 +29,7 @@ export interface UiTokens {
 const UI_DARK: UiTokens = {
   canvas: "#0f172a",
   canvas3d: "#0b1020",
+  field: "#0f172a",
   panel: "#1e293b",
   panelAlt: "#0f172a",
   panelHover: "#273449",
@@ -44,6 +47,7 @@ const UI_DARK: UiTokens = {
 const UI_LIGHT: UiTokens = {
   canvas: "#fbfcfd",       // 2D 배경 — 회색기를 빼고 거의 흰색에 가깝게
   canvas3d: "#eef1f5",     // 3D 씬 배경 — 다크 카드와 대비되도록 약간 밝은 톤
+  field: "#ffffff",
   panel: "#ffffff",
   panelAlt: "#f6f8fa",
   panelHover: "#eef1f4",
@@ -157,17 +161,40 @@ export const controlButton: React.CSSProperties = computeControlButton();
  *
  * @param hostBg IDE 패널 배경색(hex). 라이트 테마에서 캔버스 배경을 이 색으로 맞춰
  *   주변 IDE 패널(예: Gradle 툴윈도우)과 이음매 없이 붙인다. 다크는 자체 팔레트 유지.
+ * @param transparent true 면 캔버스/문서 배경을 투명으로 칠한다 — 비불투명 OSR JCEF 뒤의
+ *   IDE 배경(월페이퍼)이 비치게 하기 위함. 노드/카드/툴바(panel 계열)는 불투명 유지.
  */
-export function applyTheme(mode: ThemeMode | string | undefined, hostBg?: string): void {
+export function applyTheme(
+  mode: ThemeMode | string | undefined,
+  hostBg?: string,
+  transparent?: boolean
+): void {
   const tokens: UiTokens = { ...(mode === "light" ? UI_LIGHT : UI_DARK) };
   if (mode === "light" && hostBg) {
     // 카드(panel) 는 흰색으로 띄워 두고, 배경 계열만 IDE 패널색과 동일하게.
     tokens.canvas = hostBg;
     tokens.canvas3d = hostBg;
     tokens.panelAlt = hostBg;
+    tokens.field = hostBg;
+  }
+  if (transparent) {
+    // 배경 계열만 투명 — chrome(panel/border/text)은 그대로 불투명.
+    tokens.canvas = "transparent";
+    tokens.canvas3d = "transparent";
+    tokens.panelAlt = "transparent";
   }
   Object.assign(UI, tokens);
   Object.assign(controlButton, computeControlButton());
+
+  // index.html 의 정적 최하단 배경(html/body/#root)까지 동기화한다.
+  // 투명이면 transparent, 아니면 현재 캔버스색으로 — 라이트에서 #0b1020 이 새는 것도 함께 막는다.
+  const docBg = transparent ? "transparent" : UI.canvas;
+  const root = typeof document !== "undefined" ? document.getElementById("root") : null;
+  if (typeof document !== "undefined") {
+    document.documentElement.style.background = docBg;
+    document.body.style.background = docBg;
+  }
+  if (root) root.style.background = docBg;
 }
 
 /** hex(#rrggbb) → rgba 문자열. 3D 카드의 반투명 헤더 등에 사용. */

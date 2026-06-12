@@ -64,6 +64,7 @@ class BridgeInjector(private val jsQuery: JBCefJSQuery) : CefLoadHandlerAdapter(
               window.__JPA3D_LOCALE__ = "$locale";
               window.__JPA3D_THEME__ = "$theme";
               window.__JPA3D_THEME_BG__ = "$themeBg";
+              window.__JPA3D_TRANSPARENT__ = "true";
               window.__JPA3D_BRIDGE__ = {
                 request: function(kind, args) {
                   return new Promise(function(resolve, reject) {

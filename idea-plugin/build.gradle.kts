@@ -1,9 +1,10 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
     id("java")
     id("org.jetbrains.kotlin.jvm") version "2.0.21"
-    id("org.jetbrains.intellij.platform") version "2.1.0"
+    id("org.jetbrains.intellij.platform") version "2.16.0"
 }
 
 group = "com.jpa3d"
@@ -14,6 +15,8 @@ repositories {
     intellijPlatform {
         defaultRepositories()
         intellijDependencies()
+        // verifyPlugin 이 EAP(2026.2-EAP-SNAPSHOT) IDE 를 받을 수 있도록 스냅샷 채널 추가.
+        snapshots()
     }
 }
 
@@ -50,8 +53,7 @@ dependencies {
         bundledPlugin("org.jetbrains.kotlin")
         plugins()
 
-        // instrumentCode task 가 NotNull 등 어노테이션 인식을 위해 필요
-        instrumentationTools()
+        // (2.16.0 부터 instrumentationTools() 제거 — 코드 instrumentation 이 자동 구성됨)
 
         // Analyzer 테스트는 LightJavaCodeInsightFixtureTestCase 를 상속해 PSI/UAST 픽스처가 필요.
         // 이 프레임워크가 JUnit5TestSessionListener 를 자동 등록하는데, 그게 JUnit5 launcher 부트스트랩
@@ -91,9 +93,17 @@ intellijPlatform {
         password = providers.gradleProperty("privateKeyPassword")
     }
 
-    // pluginVerification 블록은 IntelliJ Platform Gradle Plugin 2.1 의 일부 메서드가
-    // Gradle 9 에서 컨테이너 등록 API 와 충돌해 활성화 시 빌드가 깨진다.
-    // 호환성 검사는 별도로 `./gradlew :idea-plugin:verifyPlugin` 으로 실행 가능.
+    // 바이너리 호환성 검사 — 배포 전 `./gradlew :idea-plugin:verifyPlugin` 로 실행.
+    // recommended() 가 sinceBuild(243)~최신 호환 범위에서 *받을 수 있는* IDE 빌드를 자동 선택한다
+    //   (현재 기준 2024.3 / 2025.1 / 2025.2 / 2025.3 / 2026.1 + 최신 EAP — Marketplace 검증 대상과 일치).
+    // 특정 버전만 검증하려면 ides { } 안에서 create(IntelliJPlatformType.IntellijIdeaCommunity, "<build>") 로 지정.
+    // 주의 1: recommended() 는 IntelliJ Platform Gradle Plugin 2.16+ 에서만 Gradle 9 와 호환된다(2.1.x 는 깨짐).
+    // 주의 2: 각 IDE 를 통째로 받아(버전당 ~1.5GB dmg + 압축해제) 합계 20~30GB 디스크가 필요하다.
+    pluginVerification {
+        ides {
+            recommended()
+        }
+    }
 }
 
 /**

@@ -29,7 +29,7 @@ interface Props {
   onNodeSelect: (n: GraphNode, split?: boolean) => void;
   /** 더블 클릭 — 그 노드를 중심(seed)으로 다시 탐색. */
   onNodeReseed: (n: GraphNode) => void;
-  /** 우클릭 — 그 노드를 분석에서 제거(연관 고립 노드는 연쇄 제거, Undo/툴바로 복원). */
+  /** 우클릭 — 그 노드를 분석에서 제거(연관 고립 노드는 연쇄 제거, 툴바로 복원). */
   onNodeRemove: (n: GraphNode) => void;
   highlightedIds?: Set<string>;
   /** 하이라이트의 기준이 된 노드 — highlightedIds 가 활성일 때 항상 포함됨 */
@@ -581,6 +581,12 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     const scene = fg.scene?.();
     const bbox = fg.getGraphBbox?.();
     if (scene && bbox) {
+      // 배경이 투명이면 안개를 끈다 — Fog 는 단색으로만 페이드해서 투명 배경(월페이퍼) 위에선
+      // 먼 노드가 엉뚱한 색으로 사라지고, THREE.Color 도 "transparent" 를 파싱하지 못한다.
+      if (UI.canvas3d === "transparent") {
+        scene.fog = null;
+        return;
+      }
       const span = Math.max(
         bbox.x[1] - bbox.x[0], bbox.y[1] - bbox.y[0], bbox.z[1] - bbox.z[0], 200
       );

@@ -18,7 +18,7 @@ interface Props {
   showColumns: boolean;
   /** 더블 클릭 — 그 노드를 중심(seed)으로 다시 탐색. */
   onNodeReseed: (n: GraphNode) => void;
-  /** 우클릭 — 그 노드를 분석에서 제거(연관 고립 노드는 연쇄 제거, Undo/툴바로 복원). */
+  /** 우클릭 — 그 노드를 분석에서 제거(연관 고립 노드는 연쇄 제거, 툴바로 복원). */
   onNodeRemove: (n: GraphNode) => void;
   /** 단일 클릭 — 소스 파일 열기. @param split Cmd/Ctrl 을 누른 채 클릭 → 에디터 분할로 열기. */
   onNodeNavigate?: (n: GraphNode, split: boolean) => void;
@@ -394,7 +394,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   fill={color}
                   fontSize={11}
                   textAnchor="middle"
-                  stroke={UI.canvas}
+                  stroke={UI.field}
                   strokeWidth={3}
                   paintOrder="stroke"
                 >

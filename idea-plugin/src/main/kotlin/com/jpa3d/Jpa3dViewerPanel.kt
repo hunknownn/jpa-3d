@@ -46,7 +46,7 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
                 setProperty(JBCefClient.Properties.JS_QUERY_POOL_SIZE, 16)
             }
             Disposer.register(this, client)
-            val browser = JBCefBrowserBuilder().setClient(client).build()
+            val browser = JBCefBrowserBuilder().setClient(client).setOffScreenRendering(true).build()
             Disposer.register(client, browser)
 
             // 외부(Export 등) 가 viewer JS 를 호출할 수 있도록 핸들 등록. 패널 dispose 시 클리어.
@@ -92,6 +92,10 @@ class Jpa3dViewerPanel(private val project: Project) : Disposable {
                 browser.loadHTML(missingResourceHtml())
             }
             component = browser.component
+            // OSR 브라우저를 비불투명으로 → 뒤(IDE 배경/월페이퍼)가 비치게 한다.
+            // viewer 측은 __JPA3D_TRANSPARENT__ 플래그를 받아 캔버스/문서 배경을 transparent 로 칠한다.
+            // (노드/카드/툴바는 불투명 유지.)
+            component.isOpaque = false
 
             // === 캐시 워밍 ===
             // pooled thread 에서 인덱싱이 끝나길 기다린 뒤 한 번 분석을 돌려 캐시를 채워둔다.
