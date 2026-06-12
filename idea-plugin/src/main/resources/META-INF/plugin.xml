@@ -95,6 +95,11 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.6.0</b>
+        <ul>
+          <li><b>Follows the IDE theme</b> &mdash; the viewer chrome now tracks the IDE light/dark theme, and the canvas background is transparent so the IDE background shows through behind the graph (nodes, cards and the toolbar stay opaque for readability).</li>
+          <li><b>Filter &amp; search by class FQN</b> &mdash; the analysis filter and search now also match the fully-qualified class name, not just the simple name.</li>
+        </ul>
         <b>0.5.5</b>
         <ul>
           <li><b>Right-click now removes a node from the analysis</b> &mdash; instead of just hiding it, distances and the depth filter are recomputed, so neighbors that were only reachable through the removed node disappear with it (cascade). In <i>all</i> scope, only nodes that became orphaned by the removal are pruned &mdash; originally independent entities are kept. Undo with <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>Z</kbd>, or restore from the toolbar.</li>
