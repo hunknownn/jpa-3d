@@ -1,7 +1,7 @@
 // 공통 디자인 토큰 + 의미 색상.
 // 2D(ErdView2D), 3D(GraphView), 범례(Legend) 가 같은 소스를 공유한다.
 // 색/라벨이 한 곳에 모여야 "화면에 보이는 색 == 범례의 색" 이 보장된다.
-import { Relation } from "./types";
+import { Relation, EdgeBoundary } from "./types";
 
 export type ThemeMode = "dark" | "light";
 
@@ -104,6 +104,21 @@ export const RELATION_DASH: Partial<Record<Relation, string>> = {
   IMPLEMENTS: "7 5",
   USES_ENTITY: "3 4",
   SOFT_REF: "3 4"
+};
+
+/**
+ * 모듈 경계 분류별 엣지 강조 (엣지 3종). 색/대시는 관계(RELATION_*)가 정하고, 경계는 **두께**로 강조한다.
+ *  - INTRA   : 모듈 내부 — 배경 취급(기본 두께).
+ *  - CROSS_FK: 모듈 경계를 넘는 진짜 FK — 굵게 강조(모듈러 모놀리스의 주인공).
+ *  - CROSS_SOFT: 경계를 넘는 약한 ID 참조 — slate 점선(SOFT_REF) 그대로, 두께는 얇게 유지.
+ *
+ * width3d  : ForceGraph3D linkWidth (0 = 얇은 기본선, >0 = 실린더 두께).
+ * widthMul2d: 2D SVG stroke-width 배수.
+ */
+export const BOUNDARY_STYLE: Record<EdgeBoundary, { width3d: number; widthMul2d: number }> = {
+  INTRA:      { width3d: 0,   widthMul2d: 1 },
+  CROSS_FK:   { width3d: 2.6, widthMul2d: 2 },
+  CROSS_SOFT: { width3d: 0.6, widthMul2d: 1 }
 };
 
 /** 엔티티 종류(카드 헤더 / 3D anchor) 색상 — 관계 hue 와 분리된 계열. */

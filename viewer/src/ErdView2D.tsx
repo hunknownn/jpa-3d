@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState }
 import ELK, { ElkExtendedEdge, ElkNode } from "elkjs/lib/elk.bundled.js";
 import { GraphData, GraphLink, GraphNode, Relation } from "./types";
 import {
-  UI, RELATION_COLOR, RELATION_DASH,
+  UI, RELATION_COLOR, RELATION_DASH, BOUNDARY_STYLE,
   INHERITANCE_COLOR, KIND_COLOR, COLUMN_MARK, kindKey,
   RADIUS, FONT_MONO, controlButton
 } from "./theme";
@@ -364,6 +364,8 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
               : path.points;
             const d = pointsToPath(adjustedPoints);
             const labelPoint = midPoint(adjustedPoints);
+            // 모듈 경계 분류로 선 두께 강조 — CROSS_FK 는 굵게, INTRA/CROSS_SOFT 는 기본.
+            const boundaryMul = BOUNDARY_STYLE[l.boundary ?? "INTRA"].widthMul2d;
             return (
               <g
                 key={key}
@@ -376,7 +378,7 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
                   d={d}
                   fill="none"
                   stroke={color}
-                  strokeWidth={isHover ? 2.5 : 1.5}
+                  strokeWidth={(isHover ? 2.5 : 1.5) * boundaryMul}
                   strokeDasharray={RELATION_DASH[l.relation]}
                   opacity={0.85}
                   markerStart={(() => {

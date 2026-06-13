@@ -3,7 +3,7 @@ import ForceGraph3D, { ForceGraphMethods } from "react-force-graph-3d";
 import * as THREE from "three";
 import { GraphData, GraphLink, GraphNode } from "./types";
 import {
-  UI, CARD3D, RELATION_COLOR,
+  UI, CARD3D, RELATION_COLOR, BOUNDARY_STYLE,
   INHERITANCE_COLOR, KIND_COLOR, COLUMN_MARK, hexToRgba, kindKey,
   FONT_MONO, controlButton, RADIUS
 } from "./theme";
@@ -417,6 +417,44 @@ function computeLayers(nodes: GraphNode[], links: GraphLink[], rootId: string | 
   return layer;
 }
 
+interface ModuleCenter { x: number; z: number; }
+
+/**
+ * 모듈을 XZ 평면의 링 위 중심점으로 배치. Y 는 이미 BFS depth(층)에 쓰이므로 모듈은 XZ 로 분리한다.
+ * 모듈이 1개 이하(일반 모놀리스)면 빈 맵 → 클러스터링 없음(분리 불필요).
+ */
+function computeModuleCenters(modules: string[] | undefined): Map<string, ModuleCenter> {
+  const m = new Map<string, ModuleCenter>();
+  const mods = modules ?? [];
+  if (mods.length <= 1) return m;
+  const radius = Math.max(180, mods.length * 64);
+  mods.forEach((mod, i) => {
+    const a = (i / mods.length) * Math.PI * 2;
+    m.set(mod, { x: Math.cos(a) * radius, z: Math.sin(a) * radius });
+  });
+  return m;
+}
+
+/**
+ * 각 노드를 자기 모듈 중심으로 끌어당기는 d3 커스텀 force (XZ 평면). 같은 모듈끼리 뭉쳐
+ * 공간적으로 구역(district)이 분리된다. charge(반발)/link(연결) 와 균형을 이루도록 약하게.
+ */
+function moduleClusterForce(centers: Map<string, ModuleCenter>, strength: number) {
+  let ns: any[] = [];
+  const force = (alpha: number) => {
+    if (centers.size === 0) return;
+    const k = strength * alpha;
+    for (const n of ns) {
+      const c = centers.get(n.module ?? "");
+      if (!c) continue;
+      n.vx = (n.vx ?? 0) + (c.x - n.x) * k;
+      n.vz = (n.vz ?? 0) + (c.z - n.z) * k;
+    }
+  };
+  (force as any).initialize = (nodes: any[]) => { ns = nodes; };
+  return force;
+}
+
 const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
   { data, onNodeSelect, onNodeReseed, onNodeRemove, highlightedIds, highlightBaseId, showColumns = false, width, height, grabMode },
   ref
@@ -476,23 +514,30 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     return best;
   }, [data]);
 
+  // 모듈 → XZ 중심점. 모듈 클러스터 force 와 노드 초기 위치 시드에 공유.
+  const moduleCenters = useMemo(() => computeModuleCenters(data.modules), [data.modules]);
+
   // 층(fy) 핀 고정 + x/z 는 force 에 맡김. ForceGraph 는 매번 새 객체를 받아야 한다.
+  // 초기 x/z 는 모듈 중심 근처로 시드해 모듈 분리가 빠르게 수렴하게 한다.
   const graphData = useMemo(() => {
     const layers = computeLayers(data.nodes, data.links, rootId);
     let maxL = 0;
     for (const v of layers.values()) maxL = Math.max(maxL, v);
     const nodes = data.nodes.map((n) => {
       const L = layers.get(n.id) ?? (maxL + 1);
+      const c = moduleCenters.get(n.module ?? "");
+      const baseX = c?.x ?? 0;
+      const baseZ = c?.z ?? 0;
       return {
         ...n,
         fy: -L * LAYER_GAP,
-        x: (Math.random() - 0.5) * 220,
-        z: (Math.random() - 0.5) * 220
+        x: baseX + (Math.random() - 0.5) * (c ? 120 : 220),
+        z: baseZ + (Math.random() - 0.5) * (c ? 120 : 220)
       };
     });
     const links = data.links.map((l) => ({ ...l }));
     return { nodes, links };
-  }, [data, rootId]);
+  }, [data, rootId, moduleCenters]);
 
   // 양방향/다중 엣지는 살짝 휘어 서로 겹치지 않게 — 쌍별 링크 수 집계.
   const pairCount = useMemo(() => {
@@ -574,7 +619,9 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     if (charge?.strength) charge.strength(-130);
     const link = fg.d3Force?.("link");
     if (link?.distance) link.distance(64);
-  }, [data, rootId]);
+    // 모듈 클러스터 force — 모듈이 둘 이상일 때만. 단일/없음이면 제거(null)해 영향 없음.
+    fg.d3Force?.("moduleCluster", moduleCenters.size ? moduleClusterForce(moduleCenters, 0.07) : null);
+  }, [data, rootId, moduleCenters]);
 
   // 안개 — 그래프 bbox 기준으로 잡아, 오버뷰에선 안 가리고 가까이 들어갔을 때만 먼 노드를 페이드.
   function applyFog(fg: any) {
@@ -690,10 +737,13 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
         }}
         linkOpacity={anyActive ? 0.16 : 0.5}
         linkWidth={(l: any) => {
-          if (!anyActive) return 0;
-          const s = endpointId((l as any).source);
-          const t = endpointId((l as any).target);
-          return (isOn(s) || isOn(t)) ? 1.2 : 0;
+          if (anyActive) {
+            const s = endpointId((l as any).source);
+            const t = endpointId((l as any).target);
+            return (isOn(s) || isOn(t)) ? 1.2 : 0;
+          }
+          // 평상시 — 모듈 경계 분류로 두께 강조 (CROSS_FK 굵게, 그 외 얇은 기본선).
+          return BOUNDARY_STYLE[(l as GraphLink).boundary ?? "INTRA"].width3d;
         }}
         linkDirectionalArrowLength={3}
         linkDirectionalArrowRelPos={1}
