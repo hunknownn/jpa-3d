@@ -121,6 +121,26 @@ export const BOUNDARY_STYLE: Record<EdgeBoundary, { width3d: number; widthMul2d:
   CROSS_SOFT: { width3d: 0.6, widthMul2d: 1 }
 };
 
+/** 모듈 식별 색 팔레트 — 모듈명 해시로 안정적으로 매핑(필터 칩/범례/2D 스트라이프). */
+const MODULE_PALETTE = [
+  "#60a5fa", "#34d399", "#fbbf24", "#f472b6",
+  "#a78bfa", "#22d3ee", "#fb923c", "#a3e635"
+];
+
+/** 모듈명 → 색. 같은 모듈은 항상 같은 색(해시 기반). */
+export function moduleColor(module: string): string {
+  let h = 0;
+  for (let i = 0; i < module.length; i++) h = (h * 31 + module.charCodeAt(i)) >>> 0;
+  return MODULE_PALETTE[h % MODULE_PALETTE.length];
+}
+
+/** 아키텍처 모드 배지 색. */
+export const ARCH_COLOR: Record<string, string> = {
+  MONOLITH: "#64748b",         // slate — 단일
+  MODULAR_MONOLITH: "#3b82f6", // blue  — 모듈러
+  MSA: "#f59e0b"               // amber — 분산
+};
+
 /** 엔티티 종류(카드 헤더 / 3D anchor) 색상 — 관계 hue 와 분리된 계열. */
 export const KIND_COLOR = {
   entity: "#2563eb",          // blue-600  — 주인공

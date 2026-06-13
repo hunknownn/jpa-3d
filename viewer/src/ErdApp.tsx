@@ -3,8 +3,8 @@ import GraphView, { GraphHandle } from "./GraphView";
 import ErdView2D, { Erd2dHandle } from "./ErdView2D";
 import Legend from "./Legend";
 import { fetchErd, navigateToSource, searchErd } from "./api";
-import { GraphData, GraphNode } from "./types";
-import { UI, RADIUS, controlButton, KIND_COLOR, kindKey, applyTheme } from "./theme";
+import { ArchitectureMode, GraphData, GraphNode } from "./types";
+import { UI, RADIUS, controlButton, KIND_COLOR, kindKey, applyTheme, moduleColor, ARCH_COLOR } from "./theme";
 import { IconSync, IconSearch } from "./Icons";
 import { bfsDistances, endpointId, resolveSeedIdsMulti, SeedRef } from "./graphDepth";
 import { t, setLocale } from "./i18n";
@@ -155,6 +155,9 @@ export default function ErdApp() {
   // 우클릭으로 분석에서 제거한 노드 id 집합 — 거리/depth 재계산에 반영되고, 그로 인해 고립된
   // 연관 노드는 연쇄로 사라진다. 툴바 메뉴로 복원. (URL 비저장, 세션 한정)
   const [removedIds, setRemovedIds] = useState<Set<string>>(new Set());
+  // 모듈 필터 (세션 한정) — null = 전체 표시. crossOnly = 모듈 경계 엣지만.
+  const [visibleModules, setVisibleModules] = useState<Set<string> | null>(null);
+  const [crossOnly, setCrossOnly] = useState(false);
   // 검색 드롭다운: 키보드 탐색 인덱스 + 열림 상태
   const [activeIndex, setActiveIndex] = useState(-1);
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -419,6 +422,31 @@ export default function ErdApp() {
     return { ...fullData, nodes, links };
   }, [fullData, distances, maxDepth, params.depth, params.scope, params.seeds, removedIds]);
 
+  // 분석이 바뀌어 모듈 구성이 달라지면 모듈 필터를 초기화한다 (이전 선택이 의미 없어짐).
+  const modulesSig = (fullData.modules ?? []).join("|");
+  useEffect(() => {
+    setVisibleModules(null);
+    setCrossOnly(false);
+  }, [modulesSig]);
+
+  // 모듈 필터 + 경계 엣지만 보기 적용 — depth/제거 정리가 끝난 data 위에 한 겹 더.
+  const filteredData = useMemo<GraphData>(() => {
+    const moduleCount = data.modules?.length ?? 0;
+    const moduleActive = visibleModules != null && moduleCount >= 2;
+    let nodes = data.nodes;
+    let links = data.links;
+    if (moduleActive) {
+      nodes = nodes.filter((n) => !n.module || visibleModules!.has(n.module));
+      const keep = new Set(nodes.map((n) => n.id));
+      links = links.filter((l) => keep.has(endpointId(l.source)) && keep.has(endpointId(l.target)));
+    }
+    if (crossOnly) {
+      links = links.filter((l) => l.boundary === "CROSS_FK" || l.boundary === "CROSS_SOFT");
+    }
+    if (nodes === data.nodes && links === data.links) return data;
+    return { ...data, nodes, links };
+  }, [data, visibleModules, crossOnly]);
+
   // 제거한 노드 목록(원본에 실재하는 것만) — 툴바 복원 메뉴용.
   const removedNodes = useMemo(
     () => fullData.nodes.filter((n) => removedIds.has(n.id)),
@@ -601,6 +629,26 @@ export default function ErdApp() {
           showExtends={params.showExtends}
           onChange={(patch) => setParams({ ...params, ...patch })}
         />
+        {(data.modules?.length ?? 0) >= 2 && (
+          <>
+            <Divider />
+            <ModulesMenu
+              modules={data.modules ?? []}
+              visible={visibleModules}
+              crossOnly={crossOnly}
+              onToggleModule={(mod) => setVisibleModules((prev) => {
+                const all = data.modules ?? [];
+                const cur = prev ?? new Set(all);
+                const next = new Set(cur);
+                if (next.has(mod)) next.delete(mod); else next.add(mod);
+                return next.size === all.length ? null : next;
+              })}
+              onAll={() => setVisibleModules(null)}
+              onNone={() => setVisibleModules(new Set())}
+              onCrossOnly={(v) => setCrossOnly(v)}
+            />
+          </>
+        )}
         {removedNodes.length > 0 && (
           <>
             <Divider />
@@ -700,6 +748,7 @@ export default function ErdApp() {
 
         {/* 우측 액션 묶음 — 한 줄일 땐 오른쪽 정렬, 좁으면 함께 내려감 */}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+          {data.architecture && <ArchitectureBadge architecture={data.architecture} />}
           <HelpButton open={showHelp} onToggle={() => setShowHelp((v) => !v)} />
           <button
             onClick={() => setRefreshTick((t) => t + 1)}
@@ -715,7 +764,7 @@ export default function ErdApp() {
             <IconSync spin={loading} />
           </button>
           <div style={{ color: UI.textMuted, fontSize: 12, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-            {t("toolbar.counts", [data.nodes.length, data.links.length])}
+            {t("toolbar.counts", [filteredData.nodes.length, filteredData.links.length])}
           </div>
         </div>
       </div>
@@ -736,7 +785,7 @@ export default function ErdApp() {
           <>
             <ErdView2D
               ref={erd2dRef}
-              data={data}
+              data={filteredData}
               width={size.w}
               height={size.h - toolbarH}
               showColumns={params.showColumns}
@@ -746,13 +795,13 @@ export default function ErdApp() {
               onNodeRemove={(n) => removeNode(n)}
               onNodeNavigate={(n, split) => navigateToSource(n.id, split)}
             />
-            <Legend view="2d" />
+            <Legend view="2d" architecture={data.architecture} modules={data.modules} />
           </>
         ) : (
           <>
             <GraphView
               ref={graphRef}
-              data={data}
+              data={filteredData}
               width={size.w}
               height={size.h - toolbarH}
               showColumns={params.showColumns}
@@ -762,7 +811,7 @@ export default function ErdApp() {
               onNodeReseed={(n) => pickSeed(n)}
               onNodeRemove={(n) => removeNode(n)}
             />
-            <Legend view="3d" />
+            <Legend view="3d" architecture={data.architecture} modules={data.modules} />
           </>
         )}
       </div>
@@ -996,6 +1045,123 @@ function OptionsMenu({ showColumns, showRepository, showExtends, onChange }: {
                 <span style={{ color: UI.textMuted, fontSize: 11 }}>{it.hint}</span>
               </button>
             ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 작은 아키텍처 배지 — MONOLITH / MODULAR_MONOLITH / MSA 를 색 점 + 라벨로 표시(툴바 우측).
+ */
+function ArchitectureBadge({ architecture }: { architecture: ArchitectureMode }) {
+  return (
+    <span
+      title={t(`arch.${architecture}.title`)}
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 5, height: 22, padding: "0 8px",
+        fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+        background: UI.field, color: UI.textDim,
+        border: `1px solid ${UI.borderStrong}`, borderRadius: 11
+      }}
+    >
+      <span style={{ width: 7, height: 7, borderRadius: "50%", background: ARCH_COLOR[architecture] ?? UI.textMuted }} />
+      {t(`arch.${architecture}`)}
+    </span>
+  );
+}
+
+/**
+ * "모듈" 드롭다운 — 다중 토글(탭 아님)로 표시할 모듈을 고르고, "경계 엣지만 보기" 로 모듈 내부
+ * 관계를 숨겨 모듈 간 결합만 본다. 모듈이 둘 이상일 때만 툴바에 노출된다.
+ */
+function ModulesMenu({ modules, visible, crossOnly, onToggleModule, onAll, onNone, onCrossOnly }: {
+  modules: string[];
+  visible: Set<string> | null;
+  crossOnly: boolean;
+  onToggleModule: (m: string) => void;
+  onAll: () => void;
+  onNone: () => void;
+  onCrossOnly: (v: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const isVisible = (m: string) => visible === null || visible.has(m);
+  const selectedCount = visible === null ? modules.length : modules.filter(isVisible).length;
+  const itemStyle: React.CSSProperties = {
+    display: "flex", alignItems: "center", gap: 8, width: "100%",
+    padding: "6px 10px", background: "transparent", border: "none",
+    borderRadius: RADIUS.control, cursor: "pointer", textAlign: "left",
+    color: UI.text, fontSize: 12
+  };
+  const linkBtnStyle: React.CSSProperties = {
+    background: "transparent", border: "none", color: UI.accent, cursor: "pointer", fontSize: 11
+  };
+  return (
+    <div style={{ ...groupStyle, position: "relative" }}>
+      <span style={labelStyle}>{t("modules.label")}</span>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title={t("modules.title")}
+        style={{ ...controlButton, gap: 6, background: open ? UI.panelHover : "transparent" }}
+      >
+        {t("modules.summary", [selectedCount, modules.length])}
+        <span style={{ fontSize: 9, color: UI.textMuted }}>{open ? "▴" : "▾"}</span>
+      </button>
+      {open && (
+        <>
+          {/* 바깥 클릭 닫기 */}
+          <div style={{ position: "fixed", inset: 0, zIndex: 39 }} onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            style={{
+              position: "absolute", top: "calc(100% + 4px)", left: 0, minWidth: 240, maxHeight: 360,
+              overflowY: "auto", zIndex: 40,
+              background: UI.panel, border: `1px solid ${UI.borderStrong}`, borderRadius: RADIUS.container,
+              padding: 4, boxShadow: "0 8px 24px rgba(0,0,0,0.45)"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 10px" }}>
+              <span style={{ fontSize: 11, color: UI.textMuted }}>{t("modules.title")}</span>
+              <span style={{ display: "flex", gap: 10 }}>
+                <button onClick={onAll} style={linkBtnStyle}>{t("modules.all")}</button>
+                <button onClick={onNone} style={linkBtnStyle}>{t("modules.none")}</button>
+              </span>
+            </div>
+            {modules.map((m) => {
+              const checked = isVisible(m);
+              return (
+                <button
+                  key={m}
+                  role="menuitemcheckbox"
+                  aria-checked={checked}
+                  onClick={() => onToggleModule(m)}
+                  style={itemStyle}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = UI.panelHover)}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                >
+                  <span style={{ width: 14, color: checked ? UI.accent : UI.textMuted }}>{checked ? "✓" : ""}</span>
+                  <span style={{ width: 10, height: 10, borderRadius: 2, flexShrink: 0, background: moduleColor(m) }} />
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m}</span>
+                </button>
+              );
+            })}
+            <div style={{ borderTop: `1px solid ${UI.border}`, marginTop: 4, paddingTop: 4 }}>
+              <button
+                role="menuitemcheckbox"
+                aria-checked={crossOnly}
+                onClick={() => onCrossOnly(!crossOnly)}
+                style={itemStyle}
+                onMouseEnter={(e) => (e.currentTarget.style.background = UI.panelHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+              >
+                <span style={{ width: 14, color: crossOnly ? UI.accent : UI.textMuted }}>{crossOnly ? "✓" : ""}</span>
+                <span style={{ flex: 1 }}>{t("modules.crossOnly")}</span>
+                <span style={{ color: UI.textMuted, fontSize: 11 }}>{t("modules.crossOnly.hint")}</span>
+              </button>
+            </div>
           </div>
         </>
       )}

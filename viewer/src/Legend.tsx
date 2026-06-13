@@ -1,10 +1,11 @@
 import { useState } from "react";
 import {
   UI, RELATION_COLOR, RELATION_DASH,
-  KIND_COLOR, INHERITANCE_COLOR, COLUMN_MARK, RADIUS
+  KIND_COLOR, INHERITANCE_COLOR, COLUMN_MARK, RADIUS,
+  ARCH_COLOR
 } from "./theme";
 import { IconLegend } from "./Icons";
-import { Relation } from "./types";
+import { ArchitectureMode, EdgeBoundary, Relation } from "./types";
 import { t, relationLabel, kindLabel, inheritanceLabel } from "./i18n";
 
 // 화면에 실제로 나타나는 관계만, 의미 순서대로.
@@ -13,13 +14,20 @@ const REL_ORDER: Relation[] = [
 ];
 const KIND_ORDER = ["entity", "mappedSuperclass", "embeddable", "repository"] as const;
 const INH_ORDER = ["SINGLE_TABLE", "JOINED", "TABLE_PER_CLASS"];
+const BOUNDARY_ORDER: EdgeBoundary[] = ["INTRA", "CROSS_FK", "CROSS_SOFT"];
 
 /**
  * 접고 펼 수 있는 범례. theme.ts 의 토큰을 그대로 읽어
  * "화면의 색 == 범례의 색" 을 보장한다. 좌하단 고정.
  */
-export default function Legend({ view }: { view: "2d" | "3d" }) {
+export default function Legend({ view, architecture, modules }: {
+  view: "2d" | "3d";
+  architecture?: ArchitectureMode | null;
+  modules?: string[];
+}) {
   const [open, setOpen] = useState(false);
+  // 모듈 경계 섹션은 모듈이 둘 이상(= 경계가 존재)일 때만 의미가 있다.
+  const showBoundary = (modules?.length ?? 0) >= 2;
 
   return (
     <div style={{ position: "absolute", left: 16, bottom: 16, zIndex: 20, fontSize: 12 }}>
@@ -67,6 +75,29 @@ export default function Legend({ view }: { view: "2d" | "3d" }) {
                 : t("legend.relations.foot.3d")}
             </div>
           </Section>
+
+          {showBoundary && (
+            <Section title={t("legend.section.boundary")}>
+              {architecture && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                  <span style={{
+                    width: 8, height: 8, borderRadius: 2, flexShrink: 0,
+                    background: ARCH_COLOR[architecture] ?? UI.textMuted
+                  }} />
+                  <span style={{ color: UI.text, fontWeight: 600 }}>{t(`arch.${architecture}`)}</span>
+                  <span style={{ color: UI.textMuted, fontSize: 11, marginLeft: "auto" }}>
+                    {(modules?.length ?? 0)} mod
+                  </span>
+                </div>
+              )}
+              {BOUNDARY_ORDER.map((b) => (
+                <Row key={b}
+                  swatch={<BoundarySwatch boundary={b} />}
+                  label={t(`legend.boundary.${b}`)}
+                />
+              ))}
+            </Section>
+          )}
 
           <Section title={t("legend.section.kinds")}>
             {KIND_ORDER.map((k) => (
@@ -146,6 +177,17 @@ function Row({ swatch, label, hint }: { swatch: React.ReactNode; label: string; 
 
 function LineSwatch({ color, dashed }: { color: string; dashed?: boolean }) {
   return <span style={{ display: "inline-block", width: 20, height: 0, borderTop: `3px ${dashed ? "dashed" : "solid"} ${color}` }} />;
+}
+
+/** 모듈 경계 분류 스와치 — 색이 아닌 **두께/대시**로 의미를 전달(화면 규칙과 동일). */
+function BoundarySwatch({ boundary }: { boundary: EdgeBoundary }) {
+  const style: Record<EdgeBoundary, { w: number; color: string; dashed: boolean }> = {
+    INTRA: { w: 2, color: UI.textMuted, dashed: false },
+    CROSS_FK: { w: 4, color: UI.text, dashed: false },
+    CROSS_SOFT: { w: 2, color: RELATION_COLOR.SOFT_REF ?? UI.textMuted, dashed: true }
+  };
+  const s = style[boundary];
+  return <span style={{ display: "inline-block", width: 20, height: 0, borderTop: `${s.w}px ${s.dashed ? "dashed" : "solid"} ${s.color}` }} />;
 }
 
 function BoxSwatch({ color }: { color: string }) {
