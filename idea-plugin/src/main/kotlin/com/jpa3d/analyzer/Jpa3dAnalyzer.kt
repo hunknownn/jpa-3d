@@ -32,6 +32,7 @@ import com.jpa3d.model.EdgeBoundary
 import com.jpa3d.model.InheritanceInfo
 import com.jpa3d.model.ModuleResolver
 import com.jpa3d.model.Relation
+import com.jpa3d.model.SoftRefHeuristic
 import org.jetbrains.uast.UAnnotation
 import org.jetbrains.uast.UClass
 import org.jetbrains.uast.UClassLiteralExpression
@@ -108,9 +109,12 @@ class Jpa3dAnalyzer(private val project: Project) {
 
         val nodes = mutableListOf<GraphNode>()
         val rawLinks = mutableListOf<GraphLink>()
+        // soft-ref 추출은 모든 엔티티 컬럼이 모인 뒤(PK 타입 비교) 돌아야 하므로 컬럼을 보관한다.
+        val columnsByFqn = HashMap<String, List<ColumnInfo>>()
 
         for ((fqn, rec) in entityClasses) {
             val extraction = extractFieldsAndRelations(rec.uClass, entityClasses.keys)
+            columnsByFqn[fqn] = extraction.columns
             nodes.add(toEntityNode(rec, extraction.columns, extraction.constraints))
             rec.uClass.javaPsi.superClass?.qualifiedName?.let { superFqn ->
                 if (entityClasses.containsKey(superFqn)) {
@@ -125,6 +129,9 @@ class Jpa3dAnalyzer(private val project: Project) {
             rawLinks.add(GraphLink(fqn, rec.targetEntity, Relation.USES_ENTITY, 1, null))
         }
 
+        // 약한 ID 참조(`userId: Long` → User) 를 SOFT_REF 엣지로 — 진짜 FK 가 없는 MSA 경계 참조 포착.
+        rawLinks.addAll(SoftRefHeuristic.extractLinks(columnsByFqn, entityClasses.keys))
+
         // mappedBy 측 엣지(label 에 "mappedBy=") 는 비주인 측이라 제거
         val links = rawLinks.filterNot { it.label?.contains("mappedBy=") == true }
 
@@ -133,8 +140,12 @@ class Jpa3dAnalyzer(private val project: Project) {
         val moduleByFqn = nodesWithModule.associate { it.id to it.module }
 
         // 엣지 경계 3종 분류 (INTRA / CROSS_FK / CROSS_SOFT).
-        val linksWithBoundary = links.map { l ->
+        val classified = links.map { l ->
             l.copy(boundary = ArchitectureDetector.classifyBoundary(moduleByFqn[l.source], moduleByFqn[l.target], l.relation))
+        }
+        // 약한 참조는 기본적으로 모듈 경계를 넘는 것(CROSS_SOFT)만 노출 — intra/미상은 노이즈라 숨긴다.
+        val linksWithBoundary = classified.filterNot {
+            it.relation == Relation.SOFT_REF && it.boundary != EdgeBoundary.CROSS_SOFT
         }
 
         // 아키텍처 모드 추론.

@@ -480,6 +480,64 @@ class Jpa3dAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     // ===================================================================================
+    // Soft-ref 엣지 (PR3) — `<name>Id` 약한 참조
+    // ===================================================================================
+
+    fun testSoftRefCreatesCrossModuleEdge() {
+        myFixture.addClass(
+            """
+            package com.example.shop.user;
+            import jakarta.persistence.*;
+            @Entity public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example.shop.order;
+            import jakarta.persistence.*;
+            @Entity public class Order {
+                @Id Long id;
+                Long userId;
+            }
+            """.trimIndent()
+        )
+        val graph = analyze()
+        val soft = graph.links.firstOrNull {
+            it.source == "com.example.shop.order.Order" &&
+                it.target == "com.example.shop.user.User" &&
+                it.relation.name == "SOFT_REF"
+        }
+        assertNotNull("SOFT_REF edge Order.userId → User missing", soft)
+        assertEquals(com.jpa3d.model.EdgeBoundary.CROSS_SOFT, soft!!.boundary)
+    }
+
+    fun testIntraModuleSoftRefHidden() {
+        // 같은 모듈(같은 패키지) 안의 약한 참조는 기본적으로 숨겨진다.
+        myFixture.addClass(
+            """
+            package com.example.shop;
+            import jakarta.persistence.*;
+            @Entity public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example.shop;
+            import jakarta.persistence.*;
+            @Entity public class Order {
+                @Id Long id;
+                Long userId;
+            }
+            """.trimIndent()
+        )
+        val graph = analyze()
+        assertNull(
+            "intra-module soft-ref 는 노출되면 안 됨",
+            graph.links.firstOrNull { it.relation.name == "SOFT_REF" }
+        )
+    }
+
+    // ===================================================================================
     // @SequenceGenerator
     // ===================================================================================
 
