@@ -400,6 +400,86 @@ class Jpa3dAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     // ===================================================================================
+    // 아키텍처 감지 + 엣지 boundary (PR2)
+    // light fixture 는 settings.gradle 가 없어(=0) JPA 엣지 신호로 폴백 판정.
+    // ===================================================================================
+
+    fun testMonolithWhenSingleModule() {
+        myFixture.addClass(
+            """
+            package com.example.shop;
+            import jakarta.persistence.*;
+            @Entity public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example.shop;
+            import jakarta.persistence.*;
+            @Entity public class Order {
+                @Id Long id;
+                @ManyToOne User user;
+            }
+            """.trimIndent()
+        )
+        val graph = analyze()
+        assertEquals(com.jpa3d.model.ArchitectureMode.MONOLITH, graph.architecture)
+        // 같은 모듈 → INTRA
+        val edge = graph.links.first { it.source == "com.example.shop.Order" && it.target == "com.example.shop.User" }
+        assertEquals(com.jpa3d.model.EdgeBoundary.INTRA, edge.boundary)
+    }
+
+    fun testModularMonolithWhenCrossModuleRelation() {
+        // 두 도메인 패키지 + 경계를 넘는 진짜 @ManyToOne → 공유 영속성 → MODULAR_MONOLITH.
+        myFixture.addClass(
+            """
+            package com.example.shop.user;
+            import jakarta.persistence.*;
+            @Entity public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example.shop.order;
+            import jakarta.persistence.*;
+            import com.example.shop.user.User;
+            @Entity public class Order {
+                @Id Long id;
+                @ManyToOne User user;
+            }
+            """.trimIndent()
+        )
+        val graph = analyze()
+        assertEquals(com.jpa3d.model.ArchitectureMode.MODULAR_MONOLITH, graph.architecture)
+        assertEquals(listOf("order", "user"), graph.modules)
+        val edge = graph.links.first { it.source == "com.example.shop.order.Order" && it.target == "com.example.shop.user.User" }
+        assertEquals(com.jpa3d.model.EdgeBoundary.CROSS_FK, edge.boundary)
+    }
+
+    fun testMsaWhenModulesIsolated() {
+        // 두 도메인 패키지인데 경계를 넘는 JPA 관계가 없음 → (settings 미상 폴백) MSA.
+        myFixture.addClass(
+            """
+            package com.example.shop.user;
+            import jakarta.persistence.*;
+            @Entity public class User { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example.shop.order;
+            import jakarta.persistence.*;
+            @Entity public class Order {
+                @Id Long id;
+                Long userId;
+            }
+            """.trimIndent()
+        )
+        val graph = analyze()
+        assertEquals(com.jpa3d.model.ArchitectureMode.MSA, graph.architecture)
+    }
+
+    // ===================================================================================
     // @SequenceGenerator
     // ===================================================================================
 

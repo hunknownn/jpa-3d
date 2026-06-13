@@ -17,6 +17,7 @@ import com.intellij.psi.PsiLiteralExpression
 import com.intellij.psi.PsiSubstitutor
 import com.intellij.psi.PsiType
 import com.intellij.psi.PsiTypeParameter
+import com.intellij.psi.search.FilenameIndex
 import com.intellij.psi.search.GlobalSearchScope
 import com.intellij.psi.search.searches.AnnotatedElementsSearch
 import com.intellij.psi.search.searches.ClassInheritorsSearch
@@ -26,6 +27,8 @@ import com.jpa3d.model.EntityKind
 import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphLink
 import com.jpa3d.model.GraphNode
+import com.jpa3d.model.ArchitectureDetector
+import com.jpa3d.model.EdgeBoundary
 import com.jpa3d.model.InheritanceInfo
 import com.jpa3d.model.ModuleResolver
 import com.jpa3d.model.Relation
@@ -127,9 +130,41 @@ class Jpa3dAnalyzer(private val project: Project) {
 
         // 노드에 논리 모듈 부여 — IDE/Gradle 모듈명 우선, 단일 모듈이면 패키지 세그먼트 폴백.
         val nodesWithModule = assignModules(nodes, entityClasses, repositoryClasses)
+        val moduleByFqn = nodesWithModule.associate { it.id to it.module }
 
-        GraphData(seed = "", depth = 0, nodes = nodesWithModule, links = links)
+        // 엣지 경계 3종 분류 (INTRA / CROSS_FK / CROSS_SOFT).
+        val linksWithBoundary = links.map { l ->
+            l.copy(boundary = ArchitectureDetector.classifyBoundary(moduleByFqn[l.source], moduleByFqn[l.target], l.relation))
+        }
+
+        // 아키텍처 모드 추론.
+        val moduleNames = nodesWithModule.mapNotNull { it.module }.distinct().sorted()
+        val hasCrossModuleJpaEdge = linksWithBoundary.any {
+            it.boundary == EdgeBoundary.CROSS_FK && ArchitectureDetector.isRealJpaRelation(it.relation)
+        }
+        val architecture = ArchitectureDetector.detect(
+            moduleCount = moduleNames.size,
+            settingsFileCount = countGradleSettingsFiles(),
+            hasCrossModuleJpaEdge = hasCrossModuleJpaEdge
+        )
+
+        GraphData(
+            seed = "", depth = 0,
+            nodes = nodesWithModule, links = linksWithBoundary,
+            architecture = architecture, modules = moduleNames
+        )
     }.executeSynchronously()
+
+    /**
+     * 프로젝트 내 `settings.gradle(.kts)` 파일 수 — 아키텍처 감지의 1차 신호(빌드 경계 프록시).
+     * 별도 settings 가 둘 이상이면 별도 빌드/배포 단위(= MSA), 하나면 단일 빌드(`include`)로 본다.
+     * Gradle 플러그인 API 의존 없이 인덱스로만 센다 (build/ 등 제외된 디렉터리는 projectScope 에서 빠짐).
+     */
+    private fun countGradleSettingsFiles(): Int {
+        val scope = GlobalSearchScope.projectScope(project)
+        return listOf("settings.gradle", "settings.gradle.kts")
+            .sumOf { FilenameIndex.getVirtualFilesByName(it, scope).size }
+    }
 
     /**
      * [ModuleResolver] 로 각 노드의 [GraphNode.module] 를 채운다.

@@ -90,7 +90,8 @@ export const RELATION_COLOR: Record<Relation, string> = {
   MANY_TO_MANY: "#e879f9",  // fuchsia— 핵심
   EXTENDS: "#fb7185",       // rose   — 보조(구조)
   IMPLEMENTS: "#fca5a5",    // red-300— 보조(구조)
-  USES_ENTITY: "#94a3b8"    // slate  — 보조(참조, 점선)
+  USES_ENTITY: "#94a3b8",   // slate  — 보조(참조, 점선)
+  SOFT_REF: "#94a3b8"       // slate  — 약한 ID 참조(점선). 경계 스타일은 PR4 에서 boundary 로 강조.
 };
 
 // 관계/종류/상속 전략의 **텍스트 라벨**은 i18n 으로 옮겼다(언어별).
@@ -101,7 +102,8 @@ export const RELATION_COLOR: Record<Relation, string> = {
 export const RELATION_DASH: Partial<Record<Relation, string>> = {
   EXTENDS: "7 5",
   IMPLEMENTS: "7 5",
-  USES_ENTITY: "3 4"
+  USES_ENTITY: "3 4",
+  SOFT_REF: "3 4"
 };
 
 /** 엔티티 종류(카드 헤더 / 3D anchor) 색상 — 관계 hue 와 분리된 계열. */

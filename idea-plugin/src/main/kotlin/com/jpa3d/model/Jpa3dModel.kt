@@ -16,7 +16,9 @@ enum class Relation {
     MANY_TO_ONE,
     ONE_TO_ONE,
     MANY_TO_MANY,
-    USES_ENTITY
+    USES_ENTITY,
+    /** 모듈 경계를 넘는 약한 ID 참조 (`userId: Long` → User). 엣지 emit 은 PR3. */
+    SOFT_REF
 }
 
 enum class EntityKind(val jsonValue: String) {
@@ -24,6 +26,20 @@ enum class EntityKind(val jsonValue: String) {
     MAPPED_SUPERCLASS("mappedSuperclass"),
     EMBEDDABLE("embeddable")
 }
+
+/**
+ * 프로젝트의 아키텍처 형태. [com.jpa3d.model.ArchitectureDetector] 가 추론한다.
+ * viewer 의 엣지 강조 기본값을 가른다 (MSA→약한 참조 점선 위주, MODULAR_MONOLITH→경계 FK 강조).
+ */
+enum class ArchitectureMode { MONOLITH, MODULAR_MONOLITH, MSA }
+
+/**
+ * 엣지가 모듈 경계를 어떻게 넘는지의 분류 (엣지 3종).
+ *  - [INTRA]: 같은 모듈 내부 관계.
+ *  - [CROSS_FK]: 모듈 경계를 넘는 진짜 JPA 관계 (`@ManyToOne` 등).
+ *  - [CROSS_SOFT]: 모듈 경계를 넘는 약한 ID 참조 (`userId: Long`, PR3 에서 추가).
+ */
+enum class EdgeBoundary { INTRA, CROSS_FK, CROSS_SOFT }
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class ColumnInfo(
@@ -129,7 +145,12 @@ data class GraphLink(
     /** `@JoinTable(joinColumns=@JoinColumn(name=...))` — owner 측 FK 컬럼명. 미지정이면 null. */
     val joinColumnName: String? = null,
     /** `@JoinTable(inverseJoinColumns=@JoinColumn(name=...))` — target 측 FK 컬럼명. self-ref M:N 에 필수. */
-    val inverseJoinColumnName: String? = null
+    val inverseJoinColumnName: String? = null,
+    /**
+     * 모듈 경계 분류. [com.jpa3d.analyzer.Jpa3dAnalyzer] 가 양끝 노드의 [GraphNode.module] 을 비교해
+     * 채운다. 모듈 미상이면 null. viewer 의 엣지 스타일(INTRA 배경/CROSS_FK 강조/CROSS_SOFT 점선) 키.
+     */
+    val boundary: EdgeBoundary? = null
 )
 
 data class GraphData(
@@ -138,5 +159,9 @@ data class GraphData(
     val nodes: List<GraphNode>,
     val links: List<GraphLink>,
     /** IDE 가 dumb mode (인덱싱 진행 중) 라 분석을 미룬 상태. viewer 는 자동 retry. */
-    val indexing: Boolean = false
+    val indexing: Boolean = false,
+    /** 추론된 아키텍처 형태. 분석 결과가 없으면(빈 프로젝트) null. */
+    val architecture: ArchitectureMode? = null,
+    /** 등장한 논리 모듈명 목록 (정렬·중복 제거). viewer 의 모듈 필터 칩 소스. */
+    val modules: List<String> = emptyList()
 )
