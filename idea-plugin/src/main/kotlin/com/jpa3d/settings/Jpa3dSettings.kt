@@ -66,7 +66,7 @@ class Jpa3dSettings : PersistentStateComponent<Jpa3dSettings.State> {
         var defaultScope: String = "all"
         /** 중심(seed) 모드에서 seed 로부터의 기본 홉 깊이. */
         var defaultDepth: Int = 2
-        var showColumns: Boolean = false
+        var showColumns: Boolean = true
         var showRepository: Boolean = false
         var showExtends: Boolean = true
 

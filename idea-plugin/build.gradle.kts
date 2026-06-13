@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "com.jpa3d"
-version = "0.6.0"
+version = "0.9.0"
 
 repositories {
     mavenCentral()

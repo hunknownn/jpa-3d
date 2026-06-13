@@ -95,6 +95,10 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>0.9.0</b>
+        <ul>
+          <li><b>Columns shown by default</b> &mdash; the default detail level is now <i>+columns</i> instead of relationships-only, so entity columns are visible the first time you open the viewer. Existing saved settings are kept; you can switch back via the <b>표시</b> control or Settings.</li>
+        </ul>
         <b>0.6.0</b>
         <ul>
           <li><b>Follows the IDE theme</b> &mdash; the viewer chrome now tracks the IDE light/dark theme, and the canvas background is transparent so the IDE background shows through behind the graph (nodes, cards and the toolbar stay opaque for readability).</li>
