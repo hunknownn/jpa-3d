@@ -103,7 +103,13 @@ data class GraphNode(
     val pkg: String,
     val kind: String,               // "class" / "interface"
     val stereotypes: List<String>,
-    val entity: EntityInfo?
+    val entity: EntityInfo?,
+    /**
+     * 노드가 속한 논리 모듈. [com.jpa3d.model.ModuleResolver] 가 부여한다 — IntelliJ/Gradle
+     * 모듈명(정규화) 우선, 단일 모듈 프로젝트면 공통 패키지 이후의 도메인 세그먼트로 폴백.
+     * viewer 의 공간 그룹핑/필터 키. 미산출(빈 프로젝트 등) 시 null.
+     */
+    val module: String? = null
 )
 
 @JsonInclude(JsonInclude.Include.NON_NULL)

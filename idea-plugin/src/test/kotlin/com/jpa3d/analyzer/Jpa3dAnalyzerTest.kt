@@ -375,6 +375,31 @@ class Jpa3dAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
     }
 
     // ===================================================================================
+    // 모듈 부여 (PR1)
+    // ===================================================================================
+
+    fun testModuleFromPackageSegment() {
+        // light fixture 는 단일 IDE 모듈 → ModuleResolver 가 공통 패키지 이후 도메인 세그먼트로 폴백.
+        myFixture.addClass(
+            """
+            package com.example.shop.order;
+            import jakarta.persistence.*;
+            @Entity public class Order { @Id Long id; }
+            """.trimIndent()
+        )
+        myFixture.addClass(
+            """
+            package com.example.shop.payment;
+            import jakarta.persistence.*;
+            @Entity public class Payment { @Id Long id; }
+            """.trimIndent()
+        )
+        val graph = analyze()
+        assertEquals("order", graph.entity("com.example.shop.order.Order").module)
+        assertEquals("payment", graph.entity("com.example.shop.payment.Payment").module)
+    }
+
+    // ===================================================================================
     // @SequenceGenerator
     // ===================================================================================
 

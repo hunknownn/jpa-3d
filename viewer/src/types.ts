@@ -43,6 +43,8 @@ export interface GraphNode {
   kind: string;
   stereotypes: string[];
   entity?: EntityInfo | null;
+  /** 노드가 속한 논리 모듈 (plugin 의 ModuleResolver 산출). 공간 그룹핑/필터 키. */
+  module?: string | null;
 }
 
 export interface GraphLink {

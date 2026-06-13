@@ -3,6 +3,7 @@ package com.jpa3d.analyzer
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiClass
 import com.intellij.psi.PsiClassType
@@ -26,6 +27,7 @@ import com.jpa3d.model.GraphData
 import com.jpa3d.model.GraphLink
 import com.jpa3d.model.GraphNode
 import com.jpa3d.model.InheritanceInfo
+import com.jpa3d.model.ModuleResolver
 import com.jpa3d.model.Relation
 import org.jetbrains.uast.UAnnotation
 import org.jetbrains.uast.UClass
@@ -123,8 +125,37 @@ class Jpa3dAnalyzer(private val project: Project) {
         // mappedBy 측 엣지(label 에 "mappedBy=") 는 비주인 측이라 제거
         val links = rawLinks.filterNot { it.label?.contains("mappedBy=") == true }
 
-        GraphData(seed = "", depth = 0, nodes = nodes, links = links)
+        // 노드에 논리 모듈 부여 — IDE/Gradle 모듈명 우선, 단일 모듈이면 패키지 세그먼트 폴백.
+        val nodesWithModule = assignModules(nodes, entityClasses, repositoryClasses)
+
+        GraphData(seed = "", depth = 0, nodes = nodesWithModule, links = links)
     }.executeSynchronously()
+
+    /**
+     * [ModuleResolver] 로 각 노드의 [GraphNode.module] 를 채운다.
+     *
+     * IDE 모듈명은 클래스의 소스 파일이 속한 [Module] 에서 얻는다 (라이브러리/생성 소스 등으로
+     * VirtualFile 이 없으면 null → 패키지 세그먼트 폴백). read action 안에서 호출돼야 한다.
+     */
+    private fun assignModules(
+        nodes: List<GraphNode>,
+        entityClasses: Map<String, EntityRecord>,
+        repositoryClasses: Map<String, RepositoryRecord>
+    ): List<GraphNode> {
+        val fileIndex = ProjectFileIndex.getInstance(project)
+        fun ideModuleName(u: UClass): String? {
+            val vFile = u.javaPsi.containingFile?.virtualFile ?: return null
+            return fileIndex.getModuleForFile(vFile)?.name
+        }
+
+        val ideModuleByFqn = HashMap<String, String?>()
+        for ((fqn, rec) in entityClasses) ideModuleByFqn[fqn] = ideModuleName(rec.uClass)
+        for ((fqn, rec) in repositoryClasses) ideModuleByFqn[fqn] = ideModuleName(rec.uClass)
+        val pkgByFqn = nodes.associate { it.id to it.pkg }
+
+        val moduleByFqn = ModuleResolver.assignModules(ideModuleByFqn, pkgByFqn)
+        return nodes.map { it.copy(module = moduleByFqn[it.id]) }
+    }
 
     /**
      * 주어진 어노테이션 FQN 집합(jakarta + javax) 으로 어노테이션된 클래스를 인덱스에서
