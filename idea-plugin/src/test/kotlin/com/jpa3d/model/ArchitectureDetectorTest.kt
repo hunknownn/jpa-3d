@@ -52,6 +52,14 @@ class ArchitectureDetectorTest {
             ArchitectureDetector.classifyBoundary("order", "user", Relation.SOFT_REF))
     }
 
+    @Test fun crossModuleStructuralEdgeIsNotEmphasized() {
+        // 공유 베이스 상속/Repository 참조가 경계를 넘어도 결합 신호가 아니므로 CROSS_FK 로 강조하지 않는다.
+        assertEquals(EdgeBoundary.INTRA,
+            ArchitectureDetector.classifyBoundary("catalog", "common", Relation.EXTENDS))
+        assertEquals(EdgeBoundary.INTRA,
+            ArchitectureDetector.classifyBoundary("order", "user", Relation.USES_ENTITY))
+    }
+
     @Test fun unknownModuleIsNull() {
         assertNull(ArchitectureDetector.classifyBoundary(null, "user", Relation.MANY_TO_ONE))
         assertNull(ArchitectureDetector.classifyBoundary("order", null, Relation.MANY_TO_ONE))

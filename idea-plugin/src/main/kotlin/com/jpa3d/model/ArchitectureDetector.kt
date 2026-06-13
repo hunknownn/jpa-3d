@@ -49,14 +49,23 @@ object ArchitectureDetector {
     /**
      * 엣지를 양끝 노드의 모듈로 3종 분류.
      *  - 같은 모듈 → [EdgeBoundary.INTRA]
-     *  - 다른 모듈 + [Relation.SOFT_REF] → [EdgeBoundary.CROSS_SOFT] (PR3 에서 SOFT_REF 추가 시 활성)
-     *  - 다른 모듈 + 그 외 → [EdgeBoundary.CROSS_FK]
+     *  - 다른 모듈 + [Relation.SOFT_REF] → [EdgeBoundary.CROSS_SOFT]
+     *  - 다른 모듈 + **진짜 JPA 관계**(ManyToOne 등) → [EdgeBoundary.CROSS_FK]
+     *  - 다른 모듈 + 구조 엣지(EXTENDS/IMPLEMENTS/USES_ENTITY) → [EdgeBoundary.INTRA] (배경 처리)
      *  - 한쪽이라도 모듈 미상(null) → null (분류 보류)
+     *
+     * 경계를 넘는 상속(`@MappedSuperclass` 공유 베이스)이나 Repository 참조는 "모듈 간 결합" 신호가
+     * 아니므로 CROSS_FK 로 강조하지 않는다 — 공유 커널(common) 패턴에서 진짜 FK 결합이 상속 노이즈에
+     * 묻히는 것을 막는다. (demo 검증에서 발견: BaseEntity/AuditableEntity 상속이 CROSS_FK 를 오염.)
      */
     fun classifyBoundary(sourceModule: String?, targetModule: String?, relation: Relation): EdgeBoundary? {
         if (sourceModule == null || targetModule == null) return null
         if (sourceModule == targetModule) return EdgeBoundary.INTRA
-        return if (relation == Relation.SOFT_REF) EdgeBoundary.CROSS_SOFT else EdgeBoundary.CROSS_FK
+        return when {
+            relation == Relation.SOFT_REF -> EdgeBoundary.CROSS_SOFT
+            isRealJpaRelation(relation) -> EdgeBoundary.CROSS_FK
+            else -> EdgeBoundary.INTRA // 경계 넘는 상속/Repository — 결합 신호 아님, 배경으로
+        }
     }
 
     /** [relation] 이 모듈 간 감지에 쓰는 "진짜 JPA 관계" 인지. */
