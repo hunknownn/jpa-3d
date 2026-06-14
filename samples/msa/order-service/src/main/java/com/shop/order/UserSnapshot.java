@@ -20,4 +20,6 @@ public class UserSnapshot {
 
     @Column(nullable = false)
     private String userEmail;
+
+    private String userName;
 }

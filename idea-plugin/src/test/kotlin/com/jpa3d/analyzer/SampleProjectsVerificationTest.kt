@@ -59,6 +59,8 @@ class SampleProjectsVerificationTest : LightJavaCodeInsightFixtureTestCase() {
         report("monolith", g)
 
         assertEquals(ArchitectureMode.MONOLITH, g.architecture)
+        // 도메인이 충분히 구체화돼 있어야 한다(엔티티 15개 이상).
+        assertTrue("entities=${g.nodes.count { it.entity != null }}", g.nodes.count { it.entity != null } >= 15)
         // 단일 패키지 → 모듈 1개.
         assertEquals(1, g.modules.size)
         // 경계를 넘는 엣지가 없어야 한다.
@@ -74,6 +76,7 @@ class SampleProjectsVerificationTest : LightJavaCodeInsightFixtureTestCase() {
         report("modular-monolith", g)
 
         assertEquals(ArchitectureMode.MODULAR_MONOLITH, g.architecture)
+        assertTrue("entities=${g.nodes.count { it.entity != null }}", g.nodes.count { it.entity != null } >= 15)
         assertTrue("modules=${g.modules}", g.modules.containsAll(listOf("user", "catalog", "order")))
         // 모듈 경계를 넘는 진짜 FK 가 강조됨 (Order→User, OrderItem→Product).
         val crossFk = g.links.filter { it.boundary == EdgeBoundary.CROSS_FK }
@@ -90,6 +93,7 @@ class SampleProjectsVerificationTest : LightJavaCodeInsightFixtureTestCase() {
         report("msa", g)
 
         assertEquals(ArchitectureMode.MSA, g.architecture)
+        assertTrue("entities=${g.nodes.count { it.entity != null }}", g.nodes.count { it.entity != null } >= 15)
         assertTrue("modules=${g.modules}", g.modules.containsAll(listOf("user", "product", "order")))
         // 서비스 경계를 넘는 약한 ID 참조가 점선(CROSS_SOFT)으로 잡힌다.
         val crossSoft = g.links.filter { it.boundary == EdgeBoundary.CROSS_SOFT }
