@@ -95,6 +95,13 @@
     ]]></description>
 
     <change-notes><![CDATA[
+        <b>1.0.0</b>
+        <ul>
+          <li><b>Architecture-aware views</b> &mdash; the analyzer detects whether your project is a <i>monolith</i>, <i>modular monolith</i> or <i>MSA</i> and shows it as a badge, so the graph reflects how your code is actually structured.</li>
+          <li><b>Module grouping</b> &mdash; entities are grouped by module: the 2D ERD wraps each module in a labelled container, and the 3D graph separates modules into distinct spatial clusters. A multi-toggle module filter and boundary legend are included.</li>
+          <li><b>Cross-module boundaries</b> &mdash; edges are classified as within-module, cross-module FK (real relation) or cross-module soft reference (weak ID), each styled distinctly so coupling across boundaries stands out.</li>
+          <li><b>No UI freeze</b> &mdash; analysis now runs fully off the UI thread; opening the viewer no longer blocks the IDE on first load.</li>
+        </ul>
         <b>0.9.0</b>
         <ul>
           <li><b>Columns shown by default</b> &mdash; the default detail level is now <i>+columns</i> instead of relationships-only, so entity columns are visible the first time you open the viewer. Existing saved settings are kept; you can switch back via the <b>표시</b> control or Settings.</li>
