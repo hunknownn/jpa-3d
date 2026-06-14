@@ -4,7 +4,7 @@ import { GraphData, GraphLink, GraphNode, Relation } from "./types";
 import {
   UI, RELATION_COLOR, RELATION_DASH, BOUNDARY_STYLE,
   INHERITANCE_COLOR, KIND_COLOR, COLUMN_MARK, kindKey,
-  RADIUS, FONT_MONO, controlButton
+  moduleColor, RADIUS, FONT_MONO, controlButton, hexToRgba
 } from "./theme";
 import { IconDirection, IconFit, IconReset } from "./Icons";
 import { t, relationLabel, inheritanceLabel } from "./i18n";
@@ -69,6 +69,8 @@ const CARD_W = 260;
 const CARD_HEADER_H = 32;
 const INH_BAR_H = 18;
 const ROW_H = 22;
+// 모듈 컨테이너(패키지 박스) 상단 타이틀 영역 높이.
+const MODULE_HEADER_H = 30;
 // 헤더 텍스트는 SVG 기본 sans 를 따른다. fitText 측정 정확도를 위한 근사 폰트 스택
 // (실제와 약간 달라도 보수적으로 잘리는 쪽이라 오버플로는 나지 않는다).
 const HEADER_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -77,15 +79,20 @@ type RankDir = "LR" | "TB";
 
 interface CardBox { x: number; y: number; w: number; h: number; }
 interface EdgePath { points: { x: number; y: number }[]; }
+interface ModuleBox { x: number; y: number; w: number; h: number; module: string; }
 
 interface Layout {
   nodes: Map<string, CardBox>;
   edges: Map<string, EdgePath>;
+  modules: Map<string, ModuleBox>;
   width: number;
   height: number;
 }
 
-const EMPTY_LAYOUT: Layout = { nodes: new Map(), edges: new Map(), width: 0, height: 0 };
+const EMPTY_LAYOUT: Layout = { nodes: new Map(), edges: new Map(), modules: new Map(), width: 0, height: 0 };
+
+/** ELK 부모 노드 id 접두 — 모듈 컨테이너와 엔티티 노드를 구분. */
+const MOD_PREFIX = "__mod__";
 
 // elkjs 인스턴스는 worker 를 띄울 수 있어 전역에서 한 번만 생성
 const elk = new ELK();
@@ -339,6 +346,29 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
           </marker>
         </defs>
         <g transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}>
+          {/* 모듈 컨테이너(구역) — 가장 뒤에 깔아 경계 박스 + 타이틀로 모듈을 구분. 클릭 비간섭. */}
+          <g style={{ pointerEvents: "none" }}>
+            {[...layout.modules.values()].map((mb) => {
+              const color = moduleColor(mb.module);
+              return (
+                <g key={mb.module} transform={`translate(${mb.x},${mb.y})`}>
+                  <rect
+                    width={mb.w} height={mb.h} rx={RADIUS.container}
+                    fill={hexToRgba(color, 0.05)}
+                    stroke={color} strokeWidth={1.5} strokeOpacity={0.55}
+                  />
+                  <rect width={mb.w} height={MODULE_HEADER_H} rx={RADIUS.container} fill={hexToRgba(color, 0.16)} />
+                  <rect y={MODULE_HEADER_H - RADIUS.container} width={mb.w} height={RADIUS.container} fill={hexToRgba(color, 0.16)} />
+                  <text
+                    x={14} y={MODULE_HEADER_H / 2 + 5}
+                    fill={color} fontSize={15} fontWeight={700} letterSpacing={0.3}
+                  >
+                    {mb.module}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
           {/* 엣지 */}
           {data.links.map((l, i) => {
             const key = linkKey(l, i);
@@ -654,11 +684,45 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
 
   const direction = rankdir === "LR" ? "RIGHT" : "DOWN";
 
-  const children: ElkNode[] = data.nodes.map((n) => ({
+  // 모듈이 둘 이상이면 모듈별 컨테이너(compound 노드)로 묶어 "구역"을 그린다. 1개 이하면 평면.
+  const moduleList = data.modules ?? [];
+  const moduleSet = new Set(moduleList);
+  const useContainers = moduleList.length >= 2;
+
+  const entityNode = (n: GraphNode): ElkNode => ({
     id: n.id,
     width: CARD_W,
     height: cardHeight(n, showColumns)
-  }));
+  });
+
+  let children: ElkNode[];
+  if (useContainers) {
+    // 모듈 → 엔티티 자식 묶음. 모듈 미상(또는 목록 밖) 노드는 루트 직속(orphan).
+    const byMod = new Map<string, ElkNode[]>();
+    const orphans: ElkNode[] = [];
+    for (const n of data.nodes) {
+      const mod = n.module ?? "";
+      if (mod && moduleSet.has(mod)) {
+        (byMod.get(mod) ?? byMod.set(mod, []).get(mod)!).push(entityNode(n));
+      } else {
+        orphans.push(entityNode(n));
+      }
+    }
+    children = [];
+    for (const [mod, kids] of byMod) {
+      children.push({
+        id: MOD_PREFIX + mod,
+        layoutOptions: {
+          // 상단에 타이틀 공간 확보 + 컨테이너 안쪽 여백.
+          "elk.padding": `[top=${MODULE_HEADER_H + 14},left=18,bottom=18,right=18]`
+        },
+        children: kids
+      });
+    }
+    children.push(...orphans);
+  } else {
+    children = data.nodes.map(entityNode);
+  }
 
   const nodeIds = new Set(data.nodes.map((n) => n.id));
   const edges: ElkExtendedEdge[] = [];
@@ -677,6 +741,8 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
       "elk.algorithm": "layered",
       "elk.direction": direction,
       "elk.edgeRouting": "ORTHOGONAL",
+      // compound(모듈 컨테이너) 를 단일 layered 패스로 처리 — 경계 넘는 엣지 라우팅 포함.
+      "elk.hierarchyHandling": "INCLUDE_CHILDREN",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
       // 레이어 간 간격을 늘려 엣지가 비스킵 노드 본체를 우회할 공간 확보
       "elk.layered.spacing.nodeNodeBetweenLayers": "120",
@@ -705,35 +771,48 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
     return EMPTY_LAYOUT;
   }
 
+  // 노드/모듈 박스 + 엣지를 절대 좌표로 수집. compound 레이아웃에선 자식 좌표가 부모 기준이고,
+  // 엣지도 자신이 속한 컨테이너 기준 좌표라 누적 오프셋을 더해 절대화한다. 엣지는 id 로 매칭(순서 의존 X).
   const nodeBoxes = new Map<string, CardBox>();
-  for (const c of result.children ?? []) {
-    nodeBoxes.set(c.id, {
-      x: c.x ?? 0,
-      y: c.y ?? 0,
-      w: c.width ?? CARD_W,
-      h: c.height ?? CARD_HEADER_H
-    });
-  }
+  const moduleBoxes = new Map<string, ModuleBox>();
+  const edgeById = new Map<string, EdgePath>();
+  const collect = (parent: ElkNode, ox: number, oy: number) => {
+    for (const e of parent.edges ?? []) {
+      if (!e.sections || e.sections.length === 0) continue;
+      const section = e.sections[0];
+      const points = [
+        { x: ox + section.startPoint.x, y: oy + section.startPoint.y },
+        ...(section.bendPoints ?? []).map((p) => ({ x: ox + p.x, y: oy + p.y })),
+        { x: ox + section.endPoint.x, y: oy + section.endPoint.y }
+      ];
+      edgeById.set(e.id, { points });
+    }
+    for (const c of parent.children ?? []) {
+      const ax = ox + (c.x ?? 0);
+      const ay = oy + (c.y ?? 0);
+      if (c.id.startsWith(MOD_PREFIX)) {
+        const mod = c.id.slice(MOD_PREFIX.length);
+        moduleBoxes.set(mod, { x: ax, y: ay, w: c.width ?? 0, h: c.height ?? 0, module: mod });
+        collect(c, ax, ay);
+      } else {
+        nodeBoxes.set(c.id, { x: ax, y: ay, w: c.width ?? CARD_W, h: c.height ?? CARD_HEADER_H });
+      }
+    }
+  };
+  collect(result, 0, 0);
 
   const edgePaths = new Map<string, EdgePath>();
-  let edgeIdx = 0;
   data.links.forEach((l, i) => {
     if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) return;
-    const elkEdge = (result.edges ?? [])[edgeIdx++];
-    if (!elkEdge || !elkEdge.sections || elkEdge.sections.length === 0) return;
-    const section = elkEdge.sections[0];
-    const points: { x: number; y: number }[] = [
-      { x: section.startPoint.x, y: section.startPoint.y },
-      ...(section.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y })),
-      { x: section.endPoint.x, y: section.endPoint.y }
-    ];
-    const key = `${l.source}-${l.target}-${l.relation}-${i}`;
-    edgePaths.set(key, { points });
+    const path = edgeById.get(`e-${i}-${l.relation}`);
+    if (!path) return;
+    edgePaths.set(`${l.source}-${l.target}-${l.relation}-${i}`, path);
   });
 
   return {
     nodes: nodeBoxes,
     edges: edgePaths,
+    modules: moduleBoxes,
     width: result.width ?? 0,
     height: result.height ?? 0
   };

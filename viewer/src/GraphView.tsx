@@ -427,7 +427,8 @@ function computeModuleCenters(modules: string[] | undefined): Map<string, Module
   const m = new Map<string, ModuleCenter>();
   const mods = modules ?? [];
   if (mods.length <= 1) return m;
-  const radius = Math.max(180, mods.length * 64);
+  // 모듈 구역(district)끼리 벌어지되, 기본 카메라 fit 한 화면에 들어오도록 적정 반경.
+  const radius = Math.max(220, mods.length * 90);
   mods.forEach((mod, i) => {
     const a = (i / mods.length) * Math.PI * 2;
     m.set(mod, { x: Math.cos(a) * radius, z: Math.sin(a) * radius });
@@ -620,7 +621,7 @@ const GraphView = forwardRef<GraphHandle, Props>(function GraphView(
     const link = fg.d3Force?.("link");
     if (link?.distance) link.distance(64);
     // 모듈 클러스터 force — 모듈이 둘 이상일 때만. 단일/없음이면 제거(null)해 영향 없음.
-    fg.d3Force?.("moduleCluster", moduleCenters.size ? moduleClusterForce(moduleCenters, 0.07) : null);
+    fg.d3Force?.("moduleCluster", moduleCenters.size ? moduleClusterForce(moduleCenters, 0.1) : null);
   }, [data, rootId, moduleCenters]);
 
   // 안개 — 그래프 bbox 기준으로 잡아, 오버뷰에선 안 가리고 가까이 들어갔을 때만 먼 노드를 페이드.

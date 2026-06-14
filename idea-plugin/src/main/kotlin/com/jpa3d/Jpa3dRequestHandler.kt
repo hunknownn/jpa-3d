@@ -94,7 +94,10 @@ class Jpa3dRequestHandler(private val project: Project) {
         val showRepository = (args?.get("showRepository") as? Boolean) ?: false
         val showExtends = (args?.get("showExtends") as? Boolean) ?: true
 
-        val graph = project.service<Jpa3dAnalysisCache>().getGraphData()
+        // 논블로킹 — 이 핸들러는 macOS 에서 AppKit 스레드에서 실행되므로 분석을 동기로 기다리면
+        // UI 가 프리즈된다. 아직 분석 전이면 indexing 응답을 주고 viewer 가 재시도하게 한다.
+        val graph = project.service<Jpa3dAnalysisCache>().getGraphDataOrNull()
+            ?: return INDEXING_ERD_JSON
         val filtered = filterGraph(graph, scope, seed, seedType, depth, showColumns, showRepository, showExtends)
         return mapper.writeValueAsString(filtered)
     }
@@ -130,7 +133,10 @@ class Jpa3dRequestHandler(private val project: Project) {
             val seeds = GraphScope.resolveSeeds(nodes, seedType, seed)
             if (seeds.isEmpty()) {
                 // seed 매칭 노드가 없으면(필터로 제거됐거나 빈 패키지) 그래프 비움
-                return GraphData(seed = seed, depth = depth, nodes = emptyList(), links = emptyList())
+                return GraphData(
+                    seed = seed, depth = depth, nodes = emptyList(), links = emptyList(),
+                    architecture = g.architecture
+                )
             }
             val reachable = GraphScope.reachable(seeds, links, depth)
             nodes = nodes.filter { it.id in reachable }
@@ -148,7 +154,13 @@ class Jpa3dRequestHandler(private val project: Project) {
         val keep = nodes.map { it.id }.toSet()
         links = links.filter { it.source in keep && it.target in keep }
 
-        return GraphData(seed = seed.orEmpty(), depth = depth, nodes = nodes, links = links)
+        // 5) 아키텍처/모듈 메타 보존 — viewer 의 2D 모듈 컨테이너·3D 군집·범례가 이걸 쓴다.
+        // modules 는 (필터 후) 실제로 남은 노드의 모듈로 재계산해 "Modules N/N" 칩과 일치시킨다.
+        val presentModules = nodes.mapNotNull { it.module }.distinct().sorted()
+        return GraphData(
+            seed = seed.orEmpty(), depth = depth, nodes = nodes, links = links,
+            architecture = g.architecture, modules = presentModules
+        )
     }
 
     /**
@@ -189,7 +201,8 @@ class Jpa3dRequestHandler(private val project: Project) {
         if (q.isEmpty()) return "[]"
         val includeRepositories = (args?.get("includeRepositories") as? Boolean) ?: true
 
-        val graph: GraphData = project.service<Jpa3dAnalysisCache>().getGraphData()
+        // 논블로킹 (AppKit 스레드 프리즈 회피). 아직 분석 전이면 빈 결과 — 다음 입력/재시도에서 채워진다.
+        val graph: GraphData = project.service<Jpa3dAnalysisCache>().getGraphDataOrNull() ?: return "[]"
         // 분석 대상 필터를 그래프 뷰와 동일하게 검색에도 적용 — 범위 밖 엔티티가
         // 검색으로 새어 나와 seed 추가/하이라이트 시 빈 결과가 되는 불일치를 막는다.
         val settings = Jpa3dSettings.getInstance().state

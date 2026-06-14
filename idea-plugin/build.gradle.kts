@@ -119,12 +119,43 @@ val viewerDist = viewerDir.dir("dist")
 // `web/index.html` 로 조회 가능. 다른 리소스(META-INF) 와 네임스페이스 충돌 회피.
 val generatedResourcesDir = layout.buildDirectory.dir("generated/resources")
 
+// Windows 에선 npm 이 npm.cmd 로 노출된다.
+val isWindows = System.getProperty("os.name").lowercase().contains("win")
+val npmCmd = if (isWindows) "npm.cmd" else "npm"
+
 val buildViewer by tasks.registering(Exec::class) {
-    description = "viewer 를 npm run build 로 빌드 (dist 가 비어있을 때만)"
+    description = "viewer 를 npm run build 로 빌드 (viewer 소스 변경 시 자동 재빌드)"
     workingDir = viewerDir.asFile
-    // npm 이 없는 환경에서 plugin 빌드만 시도하는 경우를 위해 viewer/dist 가 이미 있으면 스킵
-    onlyIf { !viewerDist.asFile.resolve("index.html").exists() }
-    commandLine("npm", "run", "build")
+
+    // 입력 추적 — viewer 소스/설정이 바뀌면 Gradle 이 up-to-date 를 깨고 재빌드한다.
+    // (이전엔 dist 존재만으로 스킵해, 소스를 고쳐도 옛 번들이 그대로 plugin 에 들어갔다.)
+    inputs.dir(viewerDir.dir("src")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir(viewerDir.dir("public")).withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.files(
+        viewerDir.file("package.json"),
+        viewerDir.file("package-lock.json"),
+        viewerDir.file("index.html"),
+        viewerDir.file("vite.config.ts"),
+        viewerDir.file("tsconfig.json")
+    ).withPathSensitivity(PathSensitivity.RELATIVE)
+    // 출력 = dist. 입력이 그대로면 이 task 는 UP-TO-DATE 로 스킵된다(불필요한 npm 빌드 회피).
+    outputs.dir(viewerDist)
+
+    commandLine(npmCmd, "run", "build")
+
+    // npm 이 없는 환경(헤드리스 CI 등)에서 plugin 빌드만 시도하는 경우의 안전장치 —
+    // npm 을 못 찾으면 빌드를 건너뛰고 디스크의 기존 dist 를 그대로 쓴다.
+    onlyIf {
+        val available = try {
+            ProcessBuilder(npmCmd, "-v").redirectErrorStream(true).start().waitFor() == 0
+        } catch (e: Exception) {
+            false
+        }
+        if (!available) {
+            logger.warn("npm 을 찾을 수 없어 viewer 빌드를 건너뜁니다 — 기존 viewer/dist 를 사용합니다.")
+        }
+        available
+    }
 }
 
 val copyViewer by tasks.registering(Copy::class) {
