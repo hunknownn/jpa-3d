@@ -743,6 +743,12 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
       "elk.edgeRouting": "ORTHOGONAL",
       // compound(모듈 컨테이너) 를 단일 layered 패스로 처리 — 경계 넘는 엣지 라우팅 포함.
       "elk.hierarchyHandling": "INCLUDE_CHILDREN",
+      // 엣지 좌표를 루트 절대 기준으로 받는다.
+      // 기본(CONTAINER)에선 모듈 내부 엣지 좌표가 "그 모듈 컨테이너 기준 상대좌표"로 나오는데,
+      // elkjs 는 그 엣지들을 여전히 root.edges 에 담아 보고하므로 컨테이너 오프셋이 누락되어
+      // 모듈이 원점에서 멀수록(노드 수백 개 MSA/멀티모듈) 엣지가 노드에서 수천 px 벗어난다.
+      // ROOT 로 두면 모든 엣지가 절대좌표라 오프셋 보정 없이 노드와 정확히 붙는다.
+      "elk.json.edgeCoords": "ROOT",
       "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
       // 레이어 간 간격을 늘려 엣지가 비스킵 노드 본체를 우회할 공간 확보
       "elk.layered.spacing.nodeNodeBetweenLayers": "120",
@@ -780,10 +786,12 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
     for (const e of parent.edges ?? []) {
       if (!e.sections || e.sections.length === 0) continue;
       const section = e.sections[0];
+      // edgeCoords=ROOT 라 엣지 좌표는 이미 루트 절대 기준 → 컨테이너 오프셋(ox/oy)을 더하지 않는다.
+      // (노드 박스는 부모 기준 상대좌표라 아래에서 누적 오프셋을 더해 절대화한다.)
       const points = [
-        { x: ox + section.startPoint.x, y: oy + section.startPoint.y },
-        ...(section.bendPoints ?? []).map((p) => ({ x: ox + p.x, y: oy + p.y })),
-        { x: ox + section.endPoint.x, y: oy + section.endPoint.y }
+        { x: section.startPoint.x, y: section.startPoint.y },
+        ...(section.bendPoints ?? []).map((p) => ({ x: p.x, y: p.y })),
+        { x: section.endPoint.x, y: section.endPoint.y }
       ];
       edgeById.set(e.id, { points });
     }
