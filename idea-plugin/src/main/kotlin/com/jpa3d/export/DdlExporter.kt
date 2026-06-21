@@ -90,7 +90,7 @@ class DdlExporter(
         //     시퀀스를 먼저 dropping 하면 의존성 충돌. ===
         if (dropExisting) {
             // 조인 테이블이 owner/target 을 FK 로 참조하므로 본 테이블보다 먼저 drop.
-            for (jt in joinTables) sb.append(dropTableSql(id(jt.name))).append("\n")
+            for (jt in joinTables) sb.append(dropTableSql(id(jt.name, jt.nameExplicit))).append("\n")
             for (e in emitted.reversed()) sb.append(renderDrop(e)).append("\n")
             if (dialect != DdlDialect.MYSQL && sequenceNames.isNotEmpty()) {
                 for (s in sequenceNames) sb.append(renderDropSequence(s)).append("\n")
@@ -352,7 +352,7 @@ class DdlExporter(
         }
         val pkCols = e.columns.filter { it.primaryKey }
         if (pkCols.isNotEmpty()) {
-            val pkList = pkCols.joinToString(", ") { id(it.columnName) }
+            val pkList = pkCols.joinToString(", ") { id(it.columnName, it.columnNameExplicit) }
             lines += "    PRIMARY KEY ($pkList)"
         }
         sb.append(lines.joinToString(",\n"))
@@ -362,9 +362,9 @@ class DdlExporter(
 
     private fun renderColumn(c: ExportColumn): String {
         // columnDefinition 이 있으면 타입/제약 추론을 건너뛰고 raw 정의를 그대로 사용 (JPA 와 동일).
-        c.columnDefinition?.let { return "${id(c.columnName)} $it" }
+        c.columnDefinition?.let { return "${id(c.columnName, c.columnNameExplicit)} $it" }
         val sb = StringBuilder()
-        sb.append(id(c.columnName)).append(" ").append(sqlType(c))
+        sb.append(id(c.columnName, c.columnNameExplicit)).append(" ").append(sqlType(c))
         // 정수형 PK 일 때만 generation 절 부착 — UUID/String PK 등에 IDENTITY 가 붙는 잘못된 SQL 방지
         if (c.primaryKey && c.generatedValue != null && isIntegralType(c.javaType)) {
             generationClause(c)?.let { sb.append(" ").append(it) }
@@ -425,13 +425,13 @@ class DdlExporter(
     private fun renderIndex(e: ExportEntity, c: ExportColumn): String {
         val raw = "idx_${tableNameOf(e)}_${c.columnName}".lowercase()
         val idxName = oracleLimit(raw)
-        return "CREATE INDEX ${quote(idxName)} ON ${qualifiedTable(e)} (${id(c.columnName)});"
+        return "CREATE INDEX ${quote(idxName)} ON ${qualifiedTable(e)} (${id(c.columnName, c.columnNameExplicit)});"
     }
 
     private fun renderUniqueIndex(e: ExportEntity, c: ExportColumn): String {
         val raw = "uq_${tableNameOf(e)}_${c.columnName}".lowercase()
         val idxName = oracleLimit(raw)
-        return "CREATE UNIQUE INDEX ${quote(idxName)} ON ${qualifiedTable(e)} (${id(c.columnName)});"
+        return "CREATE UNIQUE INDEX ${quote(idxName)} ON ${qualifiedTable(e)} (${id(c.columnName, c.columnNameExplicit)});"
     }
 
     private fun renderCompositeIndex(e: ExportEntity, cols: List<String>, unique: Boolean): String {
@@ -450,10 +450,11 @@ class DdlExporter(
         // 추출 범위 밖 대상이면 그 테이블은 이 스크립트에 없다 — 이미 존재한다고 가정함을 명시.
         val note = if (target.referenceOnly)
             "-- NOTE: referenced table '${tableNameOf(target)}' is outside this export; assumed to already exist.\n" else ""
-        val targetPk = targetPks.firstOrNull()?.columnName ?: "id"
+        val targetPk = targetPks.firstOrNull()
+        val targetPkId = targetPk?.let { id(it.columnName, it.columnNameExplicit) } ?: id("id")
         return note + warn + fkAlterSql(
-            qualifiedTable(e), id(c.columnName),
-            qualifiedTable(target), id(targetPk),
+            qualifiedTable(e), id(c.columnName, c.columnNameExplicit),
+            qualifiedTable(target), targetPkId,
             "fk_${tableNameOf(e)}_${c.columnName}"
         )
     }
@@ -476,9 +477,13 @@ class DdlExporter(
      * 컬럼명은 JPA 기본 규칙 `{엔티티명}_{PK컬럼}` (예: student_id), 타입은 양쪽 PK 타입을 상속.
      */
     private data class JoinTableSpec(
-        val name: String,
-        val joinColumn: String, val joinColType: String, val ownerTable: String, val ownerPkCol: String,
-        val inverseColumn: String, val inverseColType: String, val targetTable: String, val targetPkCol: String
+        val name: String, val nameExplicit: Boolean,
+        val joinColumn: String, val joinColumnExplicit: Boolean,
+        val joinColType: String, val ownerTable: String, val ownerTableExplicit: Boolean,
+        val ownerPkCol: String, val ownerPkColExplicit: Boolean,
+        val inverseColumn: String, val inverseColumnExplicit: Boolean,
+        val inverseColType: String, val targetTable: String, val targetTableExplicit: Boolean,
+        val targetPkCol: String, val targetPkColExplicit: Boolean
     )
 
     private fun buildJoinTableSpec(r: ExportRelation, tableByFqn: Map<String, ExportEntity>): JoinTableSpec? {
@@ -489,31 +494,43 @@ class DdlExporter(
         val ownerPkCol = ownerPk?.columnName ?: "id"
         val targetPkCol = targetPk?.columnName ?: "id"
         return JoinTableSpec(
+            // @JoinTable(name) 명시면 verbatim, 없으면 파생 이름이라 snake_case 대상.
             name = r.joinTableName ?: "${tableNameOf(owner)}_${tableNameOf(target)}",
+            nameExplicit = r.joinTableName != null,
             // 커스텀 @JoinColumn 우선 — self-ref M:N(owner=target)은 기본 규칙이 같은 이름이라 커스텀 필수.
             joinColumn = r.joinColumnName ?: "${owner.name}_$ownerPkCol",
+            joinColumnExplicit = r.joinColumnName != null,
             joinColType = ownerPk?.let { sqlType(it) } ?: bigint(),
             ownerTable = tableNameOf(owner),
+            ownerTableExplicit = owner.tableNameExplicit,
             ownerPkCol = ownerPkCol,
+            ownerPkColExplicit = ownerPk?.columnNameExplicit ?: false,
             inverseColumn = r.inverseJoinColumnName ?: "${target.name}_$targetPkCol",
+            inverseColumnExplicit = r.inverseJoinColumnName != null,
             inverseColType = targetPk?.let { sqlType(it) } ?: bigint(),
             targetTable = tableNameOf(target),
-            targetPkCol = targetPkCol
+            targetTableExplicit = target.tableNameExplicit,
+            targetPkCol = targetPkCol,
+            targetPkColExplicit = targetPk?.columnNameExplicit ?: false
         )
     }
 
     private fun renderJoinTable(jt: JoinTableSpec): String = buildString {
-        append("CREATE TABLE ").append(id(jt.name)).append(" (\n")
-        append("    ").append(id(jt.joinColumn)).append(" ").append(jt.joinColType).append(" NOT NULL,\n")
-        append("    ").append(id(jt.inverseColumn)).append(" ").append(jt.inverseColType).append(" NOT NULL,\n")
-        append("    PRIMARY KEY (").append(id(jt.joinColumn)).append(", ").append(id(jt.inverseColumn)).append(")\n")
+        val joinCol = id(jt.joinColumn, jt.joinColumnExplicit)
+        val inverseCol = id(jt.inverseColumn, jt.inverseColumnExplicit)
+        append("CREATE TABLE ").append(id(jt.name, jt.nameExplicit)).append(" (\n")
+        append("    ").append(joinCol).append(" ").append(jt.joinColType).append(" NOT NULL,\n")
+        append("    ").append(inverseCol).append(" ").append(jt.inverseColType).append(" NOT NULL,\n")
+        append("    PRIMARY KEY (").append(joinCol).append(", ").append(inverseCol).append(")\n")
         append(");\n")
     }
 
     private fun renderJoinTableFks(jt: JoinTableSpec): String =
-        fkAlterSql(id(jt.name), id(jt.joinColumn), id(jt.ownerTable), id(jt.ownerPkCol),
+        fkAlterSql(id(jt.name, jt.nameExplicit), id(jt.joinColumn, jt.joinColumnExplicit),
+            id(jt.ownerTable, jt.ownerTableExplicit), id(jt.ownerPkCol, jt.ownerPkColExplicit),
             "fk_${jt.name}_${jt.joinColumn}") + "\n" +
-            fkAlterSql(id(jt.name), id(jt.inverseColumn), id(jt.targetTable), id(jt.targetPkCol),
+            fkAlterSql(id(jt.name, jt.nameExplicit), id(jt.inverseColumn, jt.inverseColumnExplicit),
+                id(jt.targetTable, jt.targetTableExplicit), id(jt.targetPkCol, jt.targetPkColExplicit),
                 "fk_${jt.name}_${jt.inverseColumn}")
 
     // ===== 식별자 =====
@@ -521,12 +538,21 @@ class DdlExporter(
 
     /** `@Table(schema=...)` 가 있으면 `"schema"."table"` 로 한정, 없으면 테이블 식별자만. */
     private fun qualifiedTable(e: ExportEntity): String {
-        val table = id(tableNameOf(e))
-        return e.schema?.let { "${id(it)}.$table" } ?: table
+        val table = id(tableNameOf(e), explicit = e.tableNameExplicit)
+        // schema 는 항상 @Table(schema=...) 로 명시된 물리 이름 — verbatim.
+        return e.schema?.let { "${id(it, explicit = true)}.$table" } ?: table
     }
 
-    /** snake_case 변환 + 방언별 quoting 을 한 번에. */
-    private fun id(name: String): String = quote(if (snakeCase) toSnakeCase(name) else name)
+    /**
+     * snake_case 변환 + 방언별 quoting 을 한 번에.
+     *
+     * [explicit] = true 면 `@Table(name)`/`@Column(name)` 등으로 명시된 물리 이름이므로 변환 없이
+     * 그대로 quoting 만 한다 (JPA 가 명시 이름을 암묵 네이밍 전략에 태우지 않는 것과 동일). 명시 이름을
+     * snake_case 에 태우면 `user_Account` → `user__account` 처럼 언더스코어가 중복되는 문제가 생긴다.
+     * [explicit] = false (클래스명/필드명 추론) 일 때만 snake_case 변환 대상.
+     */
+    private fun id(name: String, explicit: Boolean = false): String =
+        quote(if (snakeCase && !explicit) toSnakeCase(name) else name)
 
     private fun quote(name: String): String = when (dialect) {
         DdlDialect.MYSQL -> "`$name`"

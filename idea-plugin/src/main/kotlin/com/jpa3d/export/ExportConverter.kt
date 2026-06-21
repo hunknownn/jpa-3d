@@ -112,6 +112,7 @@ object ExportConverter {
             `package` = node.pkg,
             kind = "entity",
             tableName = e?.tableName ?: node.name,
+            tableNameExplicit = e?.tableName != null,
             schema = e?.schema,
             inheritance = null,
             columns = listOf(toExportColumn(pk)),
@@ -171,6 +172,7 @@ object ExportConverter {
             `package` = node.pkg,
             kind = e.kind,
             tableName = e.tableName ?: node.name,
+            tableNameExplicit = e.tableName != null,
             schema = e.schema,
             inheritance = e.inheritance?.let {
                 ExportInheritance(
@@ -188,6 +190,7 @@ object ExportConverter {
     private fun toExportColumn(c: ColumnInfo): ExportColumn = ExportColumn(
         name = c.fieldName,
         columnName = c.columnName ?: c.fieldName,
+        columnNameExplicit = c.columnNameExplicit,
         javaType = c.javaType,
         primaryKey = c.primaryKey,
         nullable = c.nullable,

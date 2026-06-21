@@ -19,6 +19,13 @@ data class ExportColumn(
     val name: String,
     /** `@Column(name=...)` 또는 fieldName 으로부터 추론된 DB 컬럼 이름. */
     val columnName: String,
+    /**
+     * [columnName] 이 `@Column(name=...)` 으로 **명시**된 물리 이름인지 여부.
+     * true 면 DDL 에서 snake_case 변환 없이 그대로 사용 (JPA 가 명시 이름을 암묵 네이밍 전략에
+     * 태우지 않는 것과 동일). false (fieldName 추론) 면 snake_case 변환 대상.
+     */
+    @get:JsonIgnore
+    val columnNameExplicit: Boolean = false,
     /** FQN (예: java.lang.Long). */
     val javaType: String,
     val primaryKey: Boolean,
@@ -62,6 +69,12 @@ data class ExportEntity(
     /** "entity" / "mappedSuperclass" / "embeddable". */
     val kind: String,
     val tableName: String? = null,
+    /**
+     * [tableName] 이 `@Table(name=...)` 으로 **명시**된 물리 이름인지 여부.
+     * true 면 DDL 에서 snake_case 변환 없이 그대로 사용. false (클래스명 추론) 면 변환 대상.
+     */
+    @get:JsonIgnore
+    val tableNameExplicit: Boolean = false,
     /** `@Table(schema=...)`. DDL 에서 `schema.table` 로 한정. */
     val schema: String? = null,
     val inheritance: ExportInheritance? = null,

@@ -393,6 +393,8 @@ class Jpa3dAnalyzer(private val project: Project) {
         return ColumnInfo(
             fieldName = f.name,
             columnName = fkName,
+            // 명시 @JoinColumn(name) 은 verbatim, 파생 `필드명_id` 는 snake_case 변환 대상.
+            columnNameExplicit = explicitName != null,
             javaType = f.type.canonicalText,
             primaryKey = false,
             nullable = nullable,
@@ -580,6 +582,8 @@ class Jpa3dAnalyzer(private val project: Project) {
         return ColumnInfo(
             fieldName = f.name,
             columnName = columnName ?: f.name,
+            // 명시 @Column(name) 여부 — DDL 에서 명시 이름은 verbatim, 파생(fieldName)은 snake_case 변환.
+            columnNameExplicit = columnName != null,
             javaType = f.type.canonicalText,
             primaryKey = isPk,
             nullable = nullable,

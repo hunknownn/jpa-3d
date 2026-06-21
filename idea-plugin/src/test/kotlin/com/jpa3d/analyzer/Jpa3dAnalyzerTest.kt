@@ -109,6 +109,7 @@ class Jpa3dAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         val cols = analyze().entity("com.example.Article").entity!!.columns
         val title = cols.first { it.fieldName == "title" }
         assertEquals("title_text", title.columnName)
+        assertTrue("@Column(name) 명시 컬럼은 explicit=true 여야 함", title.columnNameExplicit)
         assertEquals(200, title.length)
         assertFalse(title.nullable)
         assertTrue(title.unique)
@@ -134,6 +135,7 @@ class Jpa3dAnalyzerTest : LightJavaCodeInsightFixtureTestCase() {
         )
         val title = analyze().entity("com.example.Article").entity!!.columns.first { it.fieldName == "title" }
         assertEquals("title", title.columnName)
+        assertFalse("name 미지정(파생) 컬럼은 explicit=false 여야 함 (DDL snake_case 대상)", title.columnNameExplicit)
         assertFalse(title.nullable)
     }
 

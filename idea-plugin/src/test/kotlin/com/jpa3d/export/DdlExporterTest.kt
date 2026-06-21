@@ -31,10 +31,12 @@ class DdlExporterTest {
         scale: Int? = null,
         lob: Boolean = false,
         sequenceName: String? = null,
-        columnName: String? = null
+        columnName: String? = null,
+        columnNameExplicit: Boolean = false
     ) = ExportColumn(
         name = name,
         columnName = columnName ?: name,
+        columnNameExplicit = columnNameExplicit,
         javaType = type,
         primaryKey = pk,
         nullable = nullable,
@@ -55,6 +57,7 @@ class DdlExporterTest {
         columns: List<ExportColumn>,
         kind: String = "entity",
         tableName: String? = null,
+        tableNameExplicit: Boolean = false,
         inheritance: ExportInheritance? = null,
         compositeIndexes: List<List<String>> = emptyList(),
         compositeUniques: List<List<String>> = emptyList()
@@ -66,6 +69,7 @@ class DdlExporterTest {
             `package` = fqn.substringBeforeLast('.', ""),
             kind = kind,
             tableName = tableName ?: simple,
+            tableNameExplicit = tableNameExplicit,
             inheritance = inheritance,
             columns = columns,
             compositeIndexes = compositeIndexes,
@@ -496,6 +500,51 @@ class DdlExporterTest {
         val out = DdlExporter(DdlDialect.POSTGRES, snakeCase = true).render(m)
         assertContains(out, "CREATE TABLE \"http_request\"")
         assertContains(out, "\"user_id\"")
+    }
+
+    @Test
+    fun `explicit Table name keeps underscores verbatim — no double underscore`() {
+        // 회귀: @Table(name="user_Account") 같은 명시 이름을 snake_case 에 태우면 'user__account' 가 됨.
+        // 명시 물리 이름은 JPA 처럼 변환 없이 그대로 써야 한다.
+        val m = model(listOf(ent("com.example.UserAccount",
+            tableName = "user_Account",
+            tableNameExplicit = true,
+            columns = listOf(col("id", "java.lang.Long", pk = true, nullable = false))
+        )))
+        val out = DdlExporter(DdlDialect.POSTGRES, snakeCase = true).render(m)
+        assertContains(out, "CREATE TABLE \"user_Account\"")
+        assertFalse(out.contains("user__account"), "explicit @Table name must not be snake_cased")
+    }
+
+    @Test
+    fun `explicit Column name keeps underscores verbatim — no double underscore`() {
+        val m = model(listOf(ent("com.example.E",
+            columns = listOf(
+                col("id", "java.lang.Long", pk = true, nullable = false),
+                col("orderRef", "java.lang.Long", columnName = "order_Ref", columnNameExplicit = true)
+            )
+        )))
+        val out = DdlExporter(DdlDialect.POSTGRES, snakeCase = true).render(m)
+        assertContains(out, "\"order_Ref\"")
+        assertFalse(out.contains("order__ref"), "explicit @Column name must not be snake_cased")
+    }
+
+    @Test
+    fun `derived names still get snake_case while explicit names stay verbatim`() {
+        // 같은 엔티티에서 파생 컬럼은 변환, 명시 컬럼은 보존 — 두 규칙이 공존함을 보장.
+        val m = model(listOf(ent("com.example.UserAccount",
+            tableName = "UserAccount", // 파생(클래스명) — explicit=false
+            columns = listOf(
+                col("id", "java.lang.Long", pk = true, nullable = false),
+                col("createdAt", "java.time.LocalDateTime"), // 파생 필드명 → created_at
+                col("zipCode", "java.lang.String", columnName = "zip_Code", columnNameExplicit = true)
+            )
+        )))
+        val out = DdlExporter(DdlDialect.POSTGRES, snakeCase = true).render(m)
+        assertContains(out, "CREATE TABLE \"user_account\"") // 파생 변환
+        assertContains(out, "\"created_at\"")                // 파생 변환
+        assertContains(out, "\"zip_Code\"")                  // 명시 보존
+        assertFalse(out.contains("zip__code"))
     }
 
     // ===================================================================================

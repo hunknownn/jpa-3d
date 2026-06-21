@@ -45,6 +45,8 @@ enum class EdgeBoundary { INTRA, CROSS_FK, CROSS_SOFT }
 data class ColumnInfo(
     val fieldName: String,
     val columnName: String?,
+    /** [columnName] 이 `@Column(name=...)` 으로 명시된 물리 이름인지 여부 (DDL snake_case 변환 제외 대상). */
+    val columnNameExplicit: Boolean = false,
     val javaType: String,
     val primaryKey: Boolean,
     val nullable: Boolean,
