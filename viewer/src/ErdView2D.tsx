@@ -94,6 +94,13 @@ const EMPTY_LAYOUT: Layout = { nodes: new Map(), edges: new Map(), modules: new 
 /** ELK 부모 노드 id 접두 — 모듈 컨테이너와 엔티티 노드를 구분. */
 const MOD_PREFIX = "__mod__";
 
+/**
+ * "구조 엣지" — 상속/Repository 참조. 공유 베이스로 몰려 허브를 만들어 레이아웃을 엉키게 하므로
+ * ELK 배치에서 제외하고(=FK 만 배치 주도), 노드 위치 확정 후 단순 직교 경로로만 그린다.
+ * (ArchitectureDetector 도 이들을 "결합 신호 아님 = 배경"으로 분류한다.)
+ */
+const STRUCTURAL_RELATIONS = new Set(["EXTENDS", "IMPLEMENTS", "USES_ENTITY"]);
+
 // elkjs 인스턴스는 worker 를 띄울 수 있어 전역에서 한 번만 생성
 const elk = new ELK();
 
@@ -208,15 +215,27 @@ const ErdView2D = forwardRef<Erd2dHandle, Props>(function ErdView2D({
     []
   );
 
+  // 연관관계 없는 노드(독립 컴포넌트)들이 한 줄로 늘어서지 않도록 뷰포트 비율을 ELK 에 넘겨
+  // 화면 비율에 맞춘 격자로 패킹한다. 창 크기/가로세로 비율이 바뀌면 따라가되, 리사이즈 도중
+  // 매 프레임 비동기 레이아웃이 도는 버벅임을 막기 위해 디바운스로 반영한다.
+  const [layoutAspect, setLayoutAspect] = useState(() =>
+    height > 0 ? Math.round((width / height) * 100) / 100 : 1.6
+  );
+  useEffect(() => {
+    const aspect = height > 0 ? Math.round((width / height) * 100) / 100 : 1.6;
+    const t = setTimeout(() => setLayoutAspect(aspect), 250);
+    return () => clearTimeout(t);
+  }, [width, height]);
+
   // elkjs 는 비동기 layout 이라 useEffect 로 계산
   useEffect(() => {
     const seq = ++layoutSeq.current;
-    computeElkLayout(data, showColumns, rankdir).then((result) => {
+    computeElkLayout(data, showColumns, rankdir, layoutAspect).then((result) => {
       // 도중에 다른 layout 요청이 들어왔다면 무시
       if (seq !== layoutSeq.current) return;
       setLayout(result);
     });
-  }, [data, showColumns, rankdir]);
+  }, [data, showColumns, rankdir, layoutAspect]);
 
   // 레이아웃이 바뀌면 자동으로 화면에 맞춤
   useEffect(() => {
@@ -679,21 +698,41 @@ function cardHeight(n: GraphNode, showColumns: boolean): number {
  * - 엣지 경로는 `section.startPoint + bendPoints + endPoint` 로 폴리라인 구성.
  * - multi-edge 는 elkjs 가 자체 id 로 구분하므로 link 인덱스를 id 에 섞어 충돌 회피.
  */
-async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: RankDir): Promise<Layout> {
+async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: RankDir, aspectRatio = 1.6): Promise<Layout> {
   if (data.nodes.length === 0) return EMPTY_LAYOUT;
 
   const direction = rankdir === "LR" ? "RIGHT" : "DOWN";
 
-  // 모듈이 둘 이상이면 모듈별 컨테이너(compound 노드)로 묶어 "구역"을 그린다. 1개 이하면 평면.
+  // 모듈 컨테이너(compound 노드)는 "진짜 멀티모듈" 아키텍처(모듈러 모놀리스/MSA)에서만 그린다.
+  // 패키지로만 나뉜 모놀리스는 모듈이 아니라 패키지라, 컨테이너로 묶으면 컨테이너 안에서 연관 없는
+  // 노드들이 한 줄로 쌓여 보기 흉하다 → 평면으로 두고 루트 레벨 격자 패킹에 맡긴다.
   const moduleList = data.modules ?? [];
   const moduleSet = new Set(moduleList);
-  const useContainers = moduleList.length >= 2;
+  const isModularArch = data.architecture === "MODULAR_MONOLITH" || data.architecture === "MSA";
+  const useContainers = moduleList.length >= 2 && isModularArch;
 
   const entityNode = (n: GraphNode): ElkNode => ({
     id: n.id,
     width: CARD_W,
     height: cardHeight(n, showColumns)
   });
+
+  const nodeIds = new Set(data.nodes.map((n) => n.id));
+
+  // 연관관계(엣지) 기준으로 노드를 군집화한다. degree 0 = 어떤 관계에도 없는 "고립" 노드.
+  // ELK 의 layered 는 고립 노드를 각각 독립 컴포넌트로 보고 뷰포트 비율 따라 한 줄로 늘어놓는다
+  // (세로로 긴 패널이면 1열로 쭉). 그래서 고립 노드는 ELK 에 넘기지 않고 아래에서 컴팩트한 격자
+  // 블록으로 따로 배치하고, ELK 에는 연결된(degree>0) 노드만 넘겨 군집끼리 촘촘히 묶이게 한다.
+  // 컨테이너 모드(진짜 멀티모듈)는 모듈 컨테이너가 그루핑을 담당하므로 분리하지 않는다.
+  const degree = new Map<string, number>();
+  for (const l of data.links) {
+    if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) continue;
+    degree.set(l.source, (degree.get(l.source) ?? 0) + 1);
+    degree.set(l.target, (degree.get(l.target) ?? 0) + 1);
+  }
+  const isolatedNodes = useContainers ? [] : data.nodes.filter((n) => (degree.get(n.id) ?? 0) === 0);
+  const isolatedSet = new Set(isolatedNodes.map((n) => n.id));
+  const elkNodes = data.nodes.filter((n) => !isolatedSet.has(n.id));
 
   let children: ElkNode[];
   if (useContainers) {
@@ -721,13 +760,17 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
     }
     children.push(...orphans);
   } else {
-    children = data.nodes.map(entityNode);
+    children = elkNodes.map(entityNode);
   }
 
-  const nodeIds = new Set(data.nodes.map((n) => n.id));
+  // 구조 엣지(상속/Repository 참조)는 레이아웃을 주도하지 않게 ELK 에서 제외한다.
+  // 이유: 공유 베이스(BaseEntity/AuditableEntity)로 EXTENDS 엣지가 몰려 허브가 되면,
+  // layered 가 그 노드들을 사방으로 끌어 FK 군집까지 엉킨다. 배치는 "진짜 관계(FK)"만으로
+  // 결정하고, 구조 엣지는 아래에서 노드 위치 기준 단순 직교 경로로 그려 정보만 유지한다.
   const edges: ElkExtendedEdge[] = [];
   data.links.forEach((l, i) => {
     if (!nodeIds.has(l.source) || !nodeIds.has(l.target)) return;
+    if (STRUCTURAL_RELATIONS.has(l.relation)) return;
     edges.push({
       id: `e-${i}-${l.relation}`,
       sources: [l.source],
@@ -749,7 +792,13 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
       // 모듈이 원점에서 멀수록(노드 수백 개 MSA/멀티모듈) 엣지가 노드에서 수천 px 벗어난다.
       // ROOT 로 두면 모든 엣지가 절대좌표라 오프셋 보정 없이 노드와 정확히 붙는다.
       "elk.json.edgeCoords": "ROOT",
-      "elk.layered.nodePlacement.strategy": "BRANDES_KOEPF",
+      // 노드 배치는 NETWORK_SIMPLEX — 소스 바로 옆 레이어에 자식을 붙여 엣지를 짧게 만든다.
+      // (BRANDES_KOEPF 는 ER 처럼 합류 많은 그래프에서 노드를 먼 레이어로 밀어 긴 평행 엣지 번들을
+      //  만들었다. NETWORK_SIMPLEX + favorStraightEdges 로 같은 footprint 에 엣지 엉킴을 크게 줄임.)
+      "elk.layered.nodePlacement.strategy": "NETWORK_SIMPLEX",
+      "elk.layered.nodePlacement.favorStraightEdges": "true",
+      // 교차 최소화 반복 횟수 ↑ — 합류 지점 지그재그/교차를 더 줄인다.
+      "elk.layered.thoroughness": "100",
       // 레이어 간 간격을 늘려 엣지가 비스킵 노드 본체를 우회할 공간 확보
       "elk.layered.spacing.nodeNodeBetweenLayers": "120",
       "elk.spacing.nodeNode": "60",
@@ -759,22 +808,30 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
       "elk.layered.spacing.edgeNodeBetweenLayers": "40",
       "elk.layered.spacing.edgeEdgeBetweenLayers": "20",
       "elk.layered.crossingMinimization.strategy": "LAYER_SWEEP",
-      "elk.layered.considerModelOrder.strategy": "NODES_AND_EDGES",
-      // 직선화 우선 — bend 가 줄고, 노드를 가로지르는 segment 발생률도 감소
-      "elk.layered.nodePlacement.bk.edgeStraightening": "IMPROVE_STRAIGHTNESS",
+      // considerModelOrder(입력 순서 강제) 는 제거 — 교차 최소화가 레이어 내 순서를 자유롭게
+      // 정하도록 둬야 합류 지점 엉킴이 풀린다. (LAYER_SWEEP 은 입력이 같으면 결정적이라 안정성 유지.)
       "elk.layered.unnecessaryBendpoints": "true",
+      // 연관관계 없는 테이블들은 각각 독립 컴포넌트라 기본적으로 한 줄로 늘어선다.
+      // 컴포넌트 분리 패킹을 켜고 목표 종횡비(뷰포트 비율)를 주면 격자처럼 컴팩트하게 묶인다.
+      "elk.separateConnectedComponents": "true",
+      "elk.aspectRatio": String(aspectRatio),
+      // 독립 컴포넌트 사이 간격을 좁혀 더 빽빽하게 배치.
+      "elk.spacing.componentComponent": "40",
       "elk.padding": "[top=30,left=30,bottom=30,right=30]"
     },
     children,
     edges
   };
 
-  let result: ElkNode;
-  try {
-    result = await elk.layout(graph);
-  } catch (err) {
-    console.error("elkjs layout failed", err);
-    return EMPTY_LAYOUT;
+  // 연결된 노드가 하나도 없으면(전부 고립) ELK 를 돌릴 필요가 없다 — 아래 격자 블록이 전체 레이아웃.
+  let result: ElkNode = { id: "root", width: 0, height: 0, children: [], edges: [] };
+  if (children.length > 0) {
+    try {
+      result = await elk.layout(graph);
+    } catch (err) {
+      console.error("elkjs layout failed", err);
+      return EMPTY_LAYOUT;
+    }
   }
 
   // 노드/모듈 박스 + 엣지를 절대 좌표로 수집. compound 레이아웃에선 자식 좌표가 부모 기준이고,
@@ -817,12 +874,66 @@ async function computeElkLayout(data: GraphData, showColumns: boolean, rankdir: 
     edgePaths.set(`${l.source}-${l.target}-${l.relation}-${i}`, path);
   });
 
+  let width = result.width ?? 0;
+  let height = result.height ?? 0;
+
+  // 고립 노드들을 컴팩트한 격자 블록으로 배치해 연결 군집 아래에 붙인다.
+  // 열 수: 연결 군집이 있으면 그 폭에 맞추고(아래에 단정하게 깔리도록), 없으면 거의 정사각이 되게
+  // 노드 수 기준으로 잡는다. 어떤 경우든 한 줄(1열)로 길게 늘어지지 않는다.
+  if (isolatedNodes.length > 0) {
+    const GAP = 40;
+    const STRIDE = CARD_W + GAP;
+    const cols = width > 0
+      ? Math.max(2, Math.round(width / STRIDE))
+      : Math.max(1, Math.round(Math.sqrt(isolatedNodes.length * Math.max(aspectRatio, 0.5))));
+    const heights = isolatedNodes.map((n) => cardHeight(n, showColumns));
+    const originY = height > 0 ? height + GAP * 2 : 0;
+
+    let y = originY;
+    let blockW = 0;
+    for (let i = 0; i < isolatedNodes.length; i += cols) {
+      const rowEnd = Math.min(i + cols, isolatedNodes.length);
+      let rowH = 0;
+      for (let k = i; k < rowEnd; k++) {
+        const x = (k - i) * STRIDE;
+        nodeBoxes.set(isolatedNodes[k].id, { x, y, w: CARD_W, h: heights[k] });
+        blockW = Math.max(blockW, x + CARD_W);
+        rowH = Math.max(rowH, heights[k]);
+      }
+      y += rowH + GAP;
+    }
+    width = Math.max(width, blockW);
+    height = y - GAP; // 마지막 행 뒤 여백 제거
+  }
+
+  // 구조 엣지(상속/Repository)는 ELK 에서 뺐으므로 경로가 없다. 노드 위치가 모두 확정된 지금,
+  // 양 끝 노드 사이를 잇는 단순 직교 경로(가까운 면에서 나가 중간에서 한 번 꺾음)를 만들어 그려준다.
+  // 레이아웃엔 영향을 주지 않으면서 상속선/참조선 정보를 유지한다.
+  data.links.forEach((l, i) => {
+    if (!STRUCTURAL_RELATIONS.has(l.relation)) return;
+    const s = nodeBoxes.get(l.source);
+    const t = nodeBoxes.get(l.target);
+    if (!s || !t) return;
+    const key = `${l.source}-${l.target}-${l.relation}-${i}`;
+    if (edgePaths.has(key)) return;
+    // target 이 source 보다 왼쪽이면 source 왼쪽 면에서 나가 target 오른쪽 면으로 — 역방향 루프 회피.
+    const targetIsLeft = t.x + t.w / 2 < s.x + s.w / 2;
+    const sx = targetIsLeft ? s.x : s.x + s.w;
+    const tx = targetIsLeft ? t.x + t.w : t.x;
+    const sy = s.y + s.h / 2;
+    const ty = t.y + t.h / 2;
+    const mx = (sx + tx) / 2;
+    edgePaths.set(key, {
+      points: [{ x: sx, y: sy }, { x: mx, y: sy }, { x: mx, y: ty }, { x: tx, y: ty }]
+    });
+  });
+
   return {
     nodes: nodeBoxes,
     edges: edgePaths,
     modules: moduleBoxes,
-    width: result.width ?? 0,
-    height: result.height ?? 0
+    width,
+    height
   };
 }
 
