@@ -123,6 +123,21 @@ val generatedResourcesDir = layout.buildDirectory.dir("generated/resources")
 val isWindows = System.getProperty("os.name").lowercase().contains("win")
 val npmCmd = if (isWindows) "npm.cmd" else "npm"
 
+// npm 실행 파일을 절대경로로 해석한다.
+// Gradle 데몬/IntelliJ 에서 띄운 빌드는 PATH 가 로그인 셸과 달라(예: /opt/homebrew/bin 누락)
+// 단순히 "npm" 으로는 "Cannot run program npm" 으로 실패할 수 있다.
+// PATH 를 먼저 뒤지고, 못 찾으면 macOS Homebrew / 일반 설치 경로를 보강한 뒤,
+// 그래도 없으면 "npm" 으로 둔다(onlyIf 가 최종적으로 가용성을 판단).
+val npmExecutable: String = run {
+    val pathDirs = (System.getenv("PATH") ?: "").split(File.pathSeparator)
+    val fallbackDirs = listOf("/opt/homebrew/bin", "/usr/local/bin", "/usr/bin")
+    (pathDirs + fallbackDirs)
+        .map { File(it, npmCmd) }
+        .firstOrNull { it.canExecute() }
+        ?.absolutePath
+        ?: npmCmd
+}
+
 val buildViewer by tasks.registering(Exec::class) {
     description = "viewer 를 npm run build 로 빌드 (viewer 소스 변경 시 자동 재빌드)"
     workingDir = viewerDir.asFile
@@ -141,13 +156,13 @@ val buildViewer by tasks.registering(Exec::class) {
     // 출력 = dist. 입력이 그대로면 이 task 는 UP-TO-DATE 로 스킵된다(불필요한 npm 빌드 회피).
     outputs.dir(viewerDist)
 
-    commandLine(npmCmd, "run", "build")
+    commandLine(npmExecutable, "run", "build")
 
     // npm 이 없는 환경(헤드리스 CI 등)에서 plugin 빌드만 시도하는 경우의 안전장치 —
     // npm 을 못 찾으면 빌드를 건너뛰고 디스크의 기존 dist 를 그대로 쓴다.
     onlyIf {
         val available = try {
-            ProcessBuilder(npmCmd, "-v").redirectErrorStream(true).start().waitFor() == 0
+            ProcessBuilder(npmExecutable, "-v").redirectErrorStream(true).start().waitFor() == 0
         } catch (e: Exception) {
             false
         }
