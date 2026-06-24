@@ -136,7 +136,7 @@ class Jpa3dAnalyzer(private val project: Project) {
         val links = rawLinks.filterNot { it.label?.contains("mappedBy=") == true }
 
         // 노드에 논리 모듈 부여 — IDE/Gradle 모듈명 우선, 단일 모듈이면 패키지 세그먼트 폴백.
-        val nodesWithModule = assignModules(nodes, entityClasses, repositoryClasses)
+        val (nodesWithModule, realModuleCount) = assignModules(nodes, entityClasses, repositoryClasses)
         val moduleByFqn = nodesWithModule.associate { it.id to it.module }
 
         // 엣지 경계 3종 분류 (INTRA / CROSS_FK / CROSS_SOFT).
@@ -155,6 +155,7 @@ class Jpa3dAnalyzer(private val project: Project) {
         }
         val architecture = ArchitectureDetector.detect(
             moduleCount = moduleNames.size,
+            realModuleCount = realModuleCount,
             settingsFileCount = countGradleSettingsFiles(),
             hasCrossModuleJpaEdge = hasCrossModuleJpaEdge
         )
@@ -177,17 +178,23 @@ class Jpa3dAnalyzer(private val project: Project) {
             .sumOf { FilenameIndex.getVirtualFilesByName(it, scope).size }
     }
 
+    /** [assignModules] 결과 — 모듈 부여된 노드 + 실제 IDE/빌드 모듈 수(아키텍처 판정 신호). */
+    private data class ModuleAssignment(val nodes: List<GraphNode>, val realModuleCount: Int)
+
     /**
      * [ModuleResolver] 로 각 노드의 [GraphNode.module] 를 채운다.
      *
      * IDE 모듈명은 클래스의 소스 파일이 속한 [Module] 에서 얻는다 (라이브러리/생성 소스 등으로
      * VirtualFile 이 없으면 null → 패키지 세그먼트 폴백). read action 안에서 호출돼야 한다.
+     *
+     * 함께 산출하는 [ModuleAssignment.realModuleCount] 는 패키지 폴백을 제외한 "진짜" IDE/빌드 모듈
+     * 수로, 패키지로만 나뉜 모놀리스를 모듈러 모놀리스로 오판하지 않도록 [ArchitectureDetector] 에 넘긴다.
      */
     private fun assignModules(
         nodes: List<GraphNode>,
         entityClasses: Map<String, EntityRecord>,
         repositoryClasses: Map<String, RepositoryRecord>
-    ): List<GraphNode> {
+    ): ModuleAssignment {
         val fileIndex = ProjectFileIndex.getInstance(project)
         fun ideModuleName(u: UClass): String? {
             val vFile = u.javaPsi.containingFile?.virtualFile ?: return null
@@ -200,7 +207,8 @@ class Jpa3dAnalyzer(private val project: Project) {
         val pkgByFqn = nodes.associate { it.id to it.pkg }
 
         val moduleByFqn = ModuleResolver.assignModules(ideModuleByFqn, pkgByFqn)
-        return nodes.map { it.copy(module = moduleByFqn[it.id]) }
+        val realModuleCount = ModuleResolver.distinctRealModules(ideModuleByFqn).size
+        return ModuleAssignment(nodes.map { it.copy(module = moduleByFqn[it.id]) }, realModuleCount)
     }
 
     /**

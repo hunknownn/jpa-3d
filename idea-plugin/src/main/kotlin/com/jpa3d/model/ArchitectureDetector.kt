@@ -21,27 +21,35 @@ object ArchitectureDetector {
      * 아키텍처 모드 추론.
      *
      * 1차 신호 = 빌드 경계(settings.gradle 개수): 모놀리스 vs MSA 의 정의 그 자체.
-     * 2차 신호 = 모듈 간 JPA 엣지: 빌드 경계를 못 읽었을 때(settingsFileCount=0)의 폴백.
+     * 보조 신호 = 실제 빌드/IDE 모듈 수(realModuleCount): 단일 빌드 안에서 "진짜 멀티모듈"과
+     *            "패키지로만 나눈 모놀리스"를 가른다.
+     * 폴백 신호 = 모듈 간 JPA 엣지: 빌드 경계를 못 읽었을 때(settingsFileCount=0).
      *
-     * | moduleCount | settingsFileCount | → mode |
-     * |---|---|---|
-     * | ≤1 | — | MONOLITH |
-     * | ≥2 | ≥2 (빌드/DB 분리) | MSA |
-     * | ≥2 | 1 (단일 빌드 include) | MODULAR_MONOLITH |
-     * | ≥2 | 0 (미상) | 모듈 간 JPA 엣지 있으면 MODULAR_MONOLITH, 없으면 MSA |
+     * | moduleCount | settingsFileCount | realModuleCount | → mode |
+     * |---|---|---|---|
+     * | ≤1 | — | — | MONOLITH |
+     * | ≥2 | ≥2 (빌드/DB 분리) | — | MSA |
+     * | ≥2 | 1 (단일 빌드 include) | ≥2 (진짜 서브프로젝트) | MODULAR_MONOLITH |
+     * | ≥2 | 1 (단일 빌드) | ≤1 (패키지로만 분리) | MONOLITH |
+     * | ≥2 | 0 (미상) | — | 모듈 간 JPA 엣지 있으면 MODULAR_MONOLITH, 없으면 MSA |
      *
-     * @param moduleCount         서로 다른 논리 모듈 수.
+     * @param moduleCount         서로 다른 논리 모듈 수(패키지 폴백 포함).
+     * @param realModuleCount     실제 IDE/Gradle 모듈 수(패키지 폴백 제외). [ModuleResolver.distinctRealModules].
      * @param settingsFileCount   프로젝트 내 settings.gradle(.kts) 파일 수. 못 셌으면 0.
      * @param hasCrossModuleJpaEdge 모듈 경계를 넘는 진짜 JPA 관계 존재 여부.
      */
     fun detect(
         moduleCount: Int,
+        realModuleCount: Int,
         settingsFileCount: Int,
         hasCrossModuleJpaEdge: Boolean
     ): ArchitectureMode = when {
         moduleCount <= 1 -> ArchitectureMode.MONOLITH
         settingsFileCount >= 2 -> ArchitectureMode.MSA
-        settingsFileCount == 1 -> ArchitectureMode.MODULAR_MONOLITH
+        // 단일 빌드: 실제 서브프로젝트가 둘 이상일 때만 모듈러 모놀리스.
+        // 빌드 모듈은 하나인데 패키지로만 나눈 경우는 그냥 모놀리스(패키지 = 모듈 아님).
+        settingsFileCount == 1 -> if (realModuleCount >= 2) ArchitectureMode.MODULAR_MONOLITH else ArchitectureMode.MONOLITH
+        // settings 미상(0): 패키지 모듈 + 엣지 신호로 폴백.
         hasCrossModuleJpaEdge -> ArchitectureMode.MODULAR_MONOLITH
         else -> ArchitectureMode.MSA
     }

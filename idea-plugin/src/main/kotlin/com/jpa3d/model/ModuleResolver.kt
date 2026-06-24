@@ -17,6 +17,19 @@ object ModuleResolver {
     const val DEFAULT_MODULE = "default"
 
     /**
+     * 정규화된 "실제 IDE/Gradle 모듈" 집합 — null(미상) 은 제외.
+     *
+     * 패키지 세그먼트로 유도한 가짜 모듈과 구분되는, 빌드/IDE 가 실제로 분리한 모듈 수다.
+     * 이게 2개 이상이어야 진짜 멀티모듈(모듈러 모놀리스/MSA)이다. 단일 빌드인데 패키지로만
+     * 나눈 모놀리스는 여기서 1개(또는 0개)로 나온다 — [ArchitectureDetector.detect] 의 신호.
+     */
+    fun distinctRealModules(ideModuleByFqn: Map<String, String?>): Set<String> =
+        ideModuleByFqn.values.asSequence()
+            .filterNotNull()
+            .map { normalizeModuleName(it) }
+            .toSet()
+
+    /**
      * IntelliJ Gradle 모듈명의 소스셋 접미사 — `<root>.<sub>.main` 형태에서 떼어낸다.
      * 떼어낸 뒤 마지막 세그먼트가 논리 모듈명(예: `order-service`).
      */
@@ -90,10 +103,7 @@ object ModuleResolver {
         pkgByFqn: Map<String, String>
     ): Map<String, String> {
         val base = commonPackagePrefix(pkgByFqn.values)
-        val distinctIde = ideModuleByFqn.values.asSequence()
-            .filterNotNull()
-            .map { normalizeModuleName(it) }
-            .toSet()
+        val distinctIde = distinctRealModules(ideModuleByFqn)
 
         if (distinctIde.size >= 2) {
             return pkgByFqn.mapValues { (fqn, pkg) ->
