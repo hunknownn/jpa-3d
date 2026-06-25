@@ -95,7 +95,7 @@
     ]]></description>
 
     <change-notes><![CDATA[
-        <b>1.0.1</b>
+        <b>1.0.2</b>
         <ul>
           <li><b>Fixed edges drifting away from nodes in large module/MSA graphs</b> &mdash; in the 2D ERD, within-module edges are now drawn attached to their nodes even when a project has hundreds of entities spread across many modules. Previously their endpoints could float far from the cards as the canvas grew.</li>
         </ul>
